@@ -101,8 +101,8 @@ Designed and implemented following real-world site reliability engineering stand
 ### 1. Clone & Launch Containers
 ```bash
 # Clone the repository
-git clone https://github.com/example/production-incident-management.git
-cd "production incident mng"
+git clone https://github.com/Jeyasaravanan18/incident-aiops-platform.git
+cd incident-aiops-platform
 
 # Copy environment template
 cp .env.example .env
