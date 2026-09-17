@@ -43,7 +43,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops_test
           SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/incident_aiops_test
           REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET: ci-secret
+          JWT_SECRET: ci-secret-key-32-chars-long-123456
 
   frontend:
     runs-on: ubuntu-latest
