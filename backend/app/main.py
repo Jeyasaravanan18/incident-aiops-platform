@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -8,9 +10,24 @@ from starlette.responses import Response
 from app.api.v1.router import api_router
 from app.api.v1.websockets import router as websocket_router
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import engine, get_database, get_mongo_client, init_db_indexes
 from app.core.errors import AppError, app_error_handler
 from app.core.middleware import RequestIDMiddleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await init_db_indexes()
+    except Exception:
+        pass
+    yield
+    try:
+        client = get_mongo_client()
+        client.close()
+    except Exception:
+        pass
+
 
 app = FastAPI(
     title="Production Incident Management & AIOps Platform",
@@ -19,6 +36,7 @@ app = FastAPI(
         "SRE incident management platform with alerting, AI assistance, "
         "and real-time operations."
     ),
+    lifespan=lifespan,
 )
 
 app.add_middleware(RequestIDMiddleware)
@@ -41,8 +59,19 @@ async def health() -> dict[str, str]:
 
 @app.get("/ready")
 async def ready() -> dict[str, str]:
-    async with engine.connect() as connection:
-        await connection.execute(text("select 1"))
+    db_status = "offline"
+    try:
+        db = get_database()
+        await db.command("ping")
+        db_status = "connected"
+    except Exception:
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("select 1"))
+            db_status = "connected"
+        except Exception:
+            pass
+
     redis_status = "offline"
     try:
         redis = Redis.from_url(settings.redis_url)
@@ -51,7 +80,7 @@ async def ready() -> dict[str, str]:
         redis_status = "connected"
     except Exception:
         pass
-    return {"status": "ready", "database": "connected", "redis": redis_status}
+    return {"status": "ready", "database": db_status, "redis": redis_status}
 
 
 @app.get("/metrics")

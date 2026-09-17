@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
+    mongodb_url: str = (
+        "mongodb+srv://sarjeya18_db_user:RL1pPN1YJpA2FLre@cluster0.ayb1anb.mongodb.net/?appName=Cluster0"
+    )
+    mongodb_db_name: str = "incident_aiops"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops"
     sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/incident_aiops"
 

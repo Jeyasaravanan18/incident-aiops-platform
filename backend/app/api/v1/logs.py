@@ -1,42 +1,46 @@
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.database import get_session
+from app.core.database import clean_doc, get_db
 from app.domain.redaction import redact_mapping, redact_text
-from app.models.log import LogEntry
-from app.models.service import Service
 from app.schemas.log import LogIngest, LogRead
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
 
 @router.post("", response_model=LogRead, status_code=201)
-async def ingest_log(payload: LogIngest, session: AsyncSession = Depends(get_session)) -> LogRead:
+async def ingest_log(payload: LogIngest, db: AsyncIOMotorDatabase = Depends(get_db)) -> LogRead:
     # Resolve service_id if service exists by name or slug
-    service = await session.scalar(
-        select(Service).where(
-            or_(Service.slug == payload.service, Service.name.ilike(payload.service))
-        )
+    service = await db.services.find_one(
+        {
+            "$or": [
+                {"slug": payload.service},
+                {"name": {"$regex": f"^{payload.service}$", "$options": "i"}},
+            ]
+        }
     )
-    service_id = service.id if service else None
+    service_id = str(service["id"]) if service else None
 
-    entry = LogEntry(
-        timestamp=payload.timestamp,
-        service_id=service_id,
-        service_name=payload.service,
-        level=payload.level.upper(),
-        message=redact_text(payload.message),
-        trace_id=payload.trace_id,
-        request_id=payload.request_id,
-        metadata_json=redact_mapping(payload.metadata),
-    )
-    session.add(entry)
-    await session.commit()
-    await session.refresh(entry)
-    return LogRead.model_validate(entry)
+    entry_id = str(uuid4())
+    ts = payload.timestamp or datetime.now(UTC)
+
+    entry = {
+        "id": entry_id,
+        "timestamp": ts,
+        "service_id": service_id,
+        "service_name": payload.service,
+        "level": payload.level.upper(),
+        "message": redact_text(payload.message),
+        "trace_id": payload.trace_id,
+        "request_id": payload.request_id,
+        "metadata_json": redact_mapping(payload.metadata),
+    }
+    await db.logs.insert_one(entry)
+    return LogRead(**clean_doc(entry))  # type: ignore
 
 
 @router.get("", response_model=list[LogRead])
@@ -50,29 +54,29 @@ async def list_logs(
     end_time: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    session: AsyncSession = Depends(get_session),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> list[LogRead]:
-    stmt = select(LogEntry)
+    query: dict[str, Any] = {}
 
     if service:
-        stmt = stmt.where(
-            or_(
-                LogEntry.service_name.ilike(f"%{service}%"),
-            )
-        )
+        query["service_name"] = {"$regex": service, "$options": "i"}
     if level:
-        stmt = stmt.where(LogEntry.level == level.upper())
+        query["level"] = level.upper()
     if trace_id:
-        stmt = stmt.where(LogEntry.trace_id == trace_id)
+        query["trace_id"] = trace_id
     if request_id:
-        stmt = stmt.where(LogEntry.request_id == request_id)
+        query["request_id"] = request_id
     if search:
-        stmt = stmt.where(LogEntry.message.ilike(f"%{search}%"))
-    if start_time:
-        stmt = stmt.where(LogEntry.timestamp >= start_time)
-    if end_time:
-        stmt = stmt.where(LogEntry.timestamp <= end_time)
+        query["message"] = {"$regex": search, "$options": "i"}
 
-    stmt = stmt.order_by(LogEntry.timestamp.desc()).offset(offset).limit(limit)
-    rows = await session.scalars(stmt)
-    return [LogRead.model_validate(r) for r in rows]
+    if start_time or end_time:
+        ts_query: dict[str, Any] = {}
+        if start_time:
+            ts_query["$gte"] = start_time
+        if end_time:
+            ts_query["$lte"] = end_time
+        query["timestamp"] = ts_query
+
+    cursor = db.logs.find(query).sort("timestamp", -1).skip(offset).limit(limit)
+    docs = await cursor.to_list(limit)
+    return [LogRead(**clean_doc(d)) for d in docs]  # type: ignore

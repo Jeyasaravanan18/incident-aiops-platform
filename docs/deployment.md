@@ -45,38 +45,36 @@ server {
 
 ---
 
-## Render Deployment (Backend & PostgreSQL)
+## Render Deployment (Backend with MongoDB Atlas)
 
 The repository includes a ready-to-use Render Blueprint (`render.yaml`).
 
 ### Option 1: Render Blueprint (Recommended - 1 Click)
 
-1. Sign up or log into [Render Dashboard](https://dashboard.render.com/).
-2. Click **New +** -> **Blueprint**.
-3. Connect your GitHub repository: `https://github.com/Jeyasaravanan18/incident-aiops-platform`.
-4. Render detects `render.yaml` and provisions:
-   - **PostgreSQL Database** (`incident-aiops-db`)
+1. Ensure **Network Access** in your [MongoDB Atlas Dashboard](https://cloud.mongodb.com/) allows access from anywhere (`0.0.0.0/0`), which is required for cloud hosting on Render.
+2. Sign up or log into [Render Dashboard](https://dashboard.render.com/).
+3. Click **New +** -> **Blueprint**.
+4. Connect your GitHub repository: `https://github.com/Jeyasaravanan18/incident-aiops-platform`.
+5. Render detects `render.yaml` and sets up:
    - **Docker Web Service** (`incident-aiops-backend`)
-5. Under Environment variables, supply your `GEMINI_API_KEY`.
-6. Click **Apply**.
-7. Render will build the container, execute Alembic migrations, seed the initial enterprise incident scenario, and launch the service with live health checks.
+6. When prompted for environment variables:
+   - `MONGODB_URL`: Paste your MongoDB Atlas connection string (`mongodb+srv://...`)
+   - `GEMINI_API_KEY`: Supply your Gemini API key
+7. Click **Apply**.
+8. Render will build the container, automatically seed the initial enterprise incident scenario into MongoDB Atlas, and launch the service with live health checks.
 
 ### Option 2: Manual Setup on Render
 
-If you prefer manual configuration without Blueprints:
-1. **Create PostgreSQL**:
-   - In Render dashboard, click **New +** -> **PostgreSQL**.
-   - Name: `incident-aiops-db`, Database: `incident_aiops`, User: `incident_user`.
-   - Copy the **Internal Database URL**.
-2. **Create Web Service**:
-   - Click **New +** -> **Web Service**.
+1. **Create Web Service**:
+   - In Render, click **New +** -> **Web Service**.
    - Connect your GitHub repo.
    - Runtime: **Docker**.
    - Dockerfile path: `./backend/Dockerfile`.
    - Docker Context: `./backend`.
    - Health Check Path: `/health`.
-3. **Set Environment Variables**:
-   - `DATABASE_URL`: paste the Internal Database URL (the backend automatically resolves `postgres://` into `postgresql+asyncpg://` and `postgresql://`).
+2. **Set Environment Variables**:
+   - `MONGODB_URL`: `mongodb+srv://...`
+   - `MONGODB_DB_NAME`: `incident_aiops`
    - `ENVIRONMENT`: `production`
    - `CORS_ORIGINS`: `*` (or your frontend URL)
    - `AUTO_SEED`: `true`
@@ -84,4 +82,5 @@ If you prefer manual configuration without Blueprints:
    - `GEMINI_API_KEY`: `<your_gemini_api_key>`
    - `GEMINI_MODEL`: `gemini-2.5-flash`
    - `JWT_SECRET`: `<generate_random_32_char_secret>`
+
 
