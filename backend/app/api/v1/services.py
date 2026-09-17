@@ -9,7 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.deps import UserAuth, require_permission
 from app.core.database import clean_doc, get_db
 from app.core.errors import AppError
-from app.models.enums import ServiceStatus
+from app.models.enums import Criticality, ServiceStatus
 from app.schemas.service import (
     ServiceCreate,
     ServiceDetailRead,
@@ -51,7 +51,7 @@ async def create_service(
         "environment": payload.environment,
         "health_endpoint": str(payload.health_endpoint) if payload.health_endpoint else None,
         "criticality": str(payload.criticality),
-        "status": "healthy",
+        "status": ServiceStatus.HEALTHY.value,
         "created_at": now,
         "updated_at": now,
     }
@@ -97,8 +97,8 @@ async def get_service(
         repository=clean_s.get("repository"),
         environment=clean_s.get("environment", "production"),
         health_endpoint=clean_s.get("health_endpoint"),
-        status=clean_s.get("status", "healthy"),
-        criticality=clean_s.get("criticality", "medium"),
+        status=clean_s.get("status", ServiceStatus.HEALTHY.value),
+        criticality=clean_s.get("criticality", Criticality.MEDIUM.value),
         created_at=clean_s["created_at"],
         updated_at=clean_s["updated_at"],
         uptime_percentage=uptime,
@@ -210,7 +210,7 @@ async def trigger_health_check(
         else (
             ServiceStatus.DEGRADED
             if (status_code and status_code < 500)
-            else ServiceStatus.UNHEALTHY
+            else ServiceStatus.DOWN
         )
     )
 

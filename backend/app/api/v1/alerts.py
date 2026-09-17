@@ -47,7 +47,7 @@ async def _enrich_alert_read(alert_doc: dict[str, Any], db: AsyncIOMotorDatabase
         service_name=s_name,
         incident_id=c.get("incident_id"),
         source=c.get("source", "system"),
-        severity=c.get("severity", "error"),
+        severity=c.get("severity", AlertSeverity.ERROR.value),
         title=c["title"],
         description=c.get("description"),
         fingerprint=c["fingerprint"],
@@ -55,7 +55,7 @@ async def _enrich_alert_read(alert_doc: dict[str, Any], db: AsyncIOMotorDatabase
         first_seen=c.get("first_seen", c.get("created_at")),
         last_seen=c.get("last_seen", c.get("created_at")),
         occurrence_count=c.get("occurrence_count", 1),
-        status=c.get("status", "firing"),
+        status=c.get("status", AlertStatus.OPEN.value),
         created_at=c.get("created_at"),
     )
 
@@ -98,7 +98,7 @@ async def list_alerts(
             service_name=s_map.get(str(c.get("service_id"))),
             incident_id=c.get("incident_id"),
             source=c.get("source", "system"),
-            severity=c.get("severity", "error"),
+            severity=c.get("severity", AlertSeverity.ERROR.value),
             title=c["title"],
             description=c.get("description"),
             fingerprint=c["fingerprint"],
@@ -106,7 +106,7 @@ async def list_alerts(
             first_seen=c.get("first_seen", c.get("created_at")),
             last_seen=c.get("last_seen", c.get("created_at")),
             occurrence_count=c.get("occurrence_count", 1),
-            status=c.get("status", "firing"),
+            status=c.get("status", AlertStatus.OPEN.value),
             created_at=c.get("created_at"),
         )
         for c in [clean_doc(d) for d in docs]
@@ -137,7 +137,7 @@ async def ingest_alert(
     existing = await db.alerts.find_one({"fingerprint": payload.fingerprint})
     if existing:
         occ = existing.get("occurrence_count", 1) + 1
-        new_st = existing.get("status", "firing")
+        new_st = clean_doc(existing).get("status", AlertStatus.OPEN.value)
         if new_st in (str(AlertStatus.RESOLVED), str(AlertStatus.SUPPRESSED)):
             new_st = str(AlertStatus.OPEN)
 
@@ -178,7 +178,7 @@ async def ingest_alert(
         {"service_id": sid, "status": {"$in": active_statuses}}
     )
 
-    crit = Criticality(service.get("criticality", "medium"))
+    crit = Criticality(clean_doc(service).get("criticality", Criticality.MEDIUM.value))
 
     if active_incident is not None:
         alert_id = str(uuid4())
@@ -195,13 +195,13 @@ async def ingest_alert(
             "first_seen": now,
             "last_seen": now,
             "occurrence_count": 1,
-            "status": "firing",
+            "status": AlertStatus.OPEN.value,
             "created_at": now,
         }
         await db.alerts.insert_one(alert_doc)
 
         new_severity = calculate_severity(payload.severity, crit)
-        curr_sev = IncidentSeverity(active_incident.get("severity", "sev3"))
+        curr_sev = IncidentSeverity(clean_doc(active_incident).get("severity", IncidentSeverity.SEV3.value))
         if new_severity.value < curr_sev.value:
             await db.incidents.update_one(
                 {"id": active_incident["id"]},
@@ -251,7 +251,7 @@ async def ingest_alert(
         "service_id": sid,
         "title": payload.title,
         "description": payload.description,
-        "status": "triggered",
+        "status": IncidentStatus.TRIGGERED.value,
         "severity": str(inc_sev),
         "detected_at": now,
         "acknowledged_at": None,
@@ -277,7 +277,7 @@ async def ingest_alert(
         "first_seen": now,
         "last_seen": now,
         "occurrence_count": 1,
-        "status": "firing",
+        "status": AlertStatus.OPEN.value,
         "created_at": now,
     }
     await db.alerts.insert_one(alert_doc)

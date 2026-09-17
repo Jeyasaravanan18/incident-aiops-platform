@@ -54,8 +54,8 @@ async def _enrich_incident_read(inc_doc: dict[str, Any], db: AsyncIOMotorDatabas
         service_name=s_name,
         title=clean_inc["title"],
         description=clean_inc.get("description"),
-        status=clean_inc.get("status", "triggered"),
-        severity=clean_inc.get("severity", "sev3"),
+        status=clean_inc.get("status", IncidentStatus.TRIGGERED.value),
+        severity=clean_inc.get("severity", IncidentSeverity.SEV3.value),
         detected_at=clean_inc.get("detected_at"),
         acknowledged_at=clean_inc.get("acknowledged_at"),
         resolved_at=clean_inc.get("resolved_at"),
@@ -122,8 +122,8 @@ async def list_incidents(
                 service_name=s_map.get(str(c.get("service_id"))),
                 title=c["title"],
                 description=c.get("description"),
-                status=c.get("status", "triggered"),
-                severity=c.get("severity", "sev3"),
+                status=c.get("status", IncidentStatus.TRIGGERED.value),
+                severity=c.get("severity", IncidentSeverity.SEV3.value),
                 detected_at=c.get("detected_at"),
                 acknowledged_at=c.get("acknowledged_at"),
                 resolved_at=c.get("resolved_at"),
@@ -155,7 +155,7 @@ async def create_incident(
         "service_id": sid,
         "title": payload.title,
         "description": payload.description,
-        "status": "triggered",
+        "status": IncidentStatus.TRIGGERED.value,
         "severity": str(payload.severity),
         "detected_at": now,
         "acknowledged_at": None,
@@ -264,8 +264,8 @@ async def get_incident(
         service_name=s_name,
         title=clean_inc["title"],
         description=clean_inc.get("description"),
-        status=clean_inc.get("status", "triggered"),
-        severity=clean_inc.get("severity", "sev3"),
+        status=clean_inc.get("status", IncidentStatus.TRIGGERED.value),
+        severity=clean_inc.get("severity", IncidentSeverity.SEV3.value),
         detected_at=clean_inc.get("detected_at"),
         acknowledged_at=clean_inc.get("acknowledged_at"),
         resolved_at=clean_inc.get("resolved_at"),
@@ -343,7 +343,8 @@ async def transition_incident(
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    current_status = IncidentStatus(incident.get("status", "triggered"))
+    clean_i = clean_doc(incident)
+    current_status = IncidentStatus(clean_i.get("status", IncidentStatus.TRIGGERED.value))
     validate_transition(current_status, payload.status)
 
     now = datetime.now(UTC)
@@ -402,7 +403,8 @@ async def reopen_incident(
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    current_status = IncidentStatus(incident.get("status", "closed"))
+    clean_i = clean_doc(incident)
+    current_status = IncidentStatus(clean_i.get("status", IncidentStatus.CLOSED.value))
     validate_reopen(current_status)
 
     now = datetime.now(UTC)

@@ -41,6 +41,12 @@ def clean_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
         if "id" not in d or not d["id"]:
             d["id"] = str(d["_id"])
         del d["_id"]
+    for key in ("status", "severity", "criticality", "role"):
+        if key in d and isinstance(d[key], str):
+            val = d[key].upper()
+            if val == "FIRING":
+                val = "OPEN"
+            d[key] = val
     return d
 
 
