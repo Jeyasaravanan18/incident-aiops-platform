@@ -7,7 +7,7 @@ from app.core.config import settings
 
 def _create_engine():
     try:
-        return create_async_engine(settings.database_url, pool_pre_ping=True)
+        return create_async_engine(settings.async_database_url, pool_pre_ping=True)
     except Exception:
         return create_async_engine("sqlite+aiosqlite:///:memory:")
 

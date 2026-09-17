@@ -10,6 +10,31 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops"
     sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/incident_aiops"
+
+    @property
+    def async_database_url(self) -> str:
+        url = self.database_url
+        if url.startswith("postgres://"):
+            return url.replace("postgres://", "postgresql+asyncpg://", 1)
+        if url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
+    @property
+    def sync_database_url_resolved(self) -> str:
+        url = self.sync_database_url
+        if url.startswith("postgres://"):
+            return url.replace("postgres://", "postgresql://", 1)
+        if url.startswith("postgresql+asyncpg://"):
+            return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        if self.database_url:
+            d_url = self.database_url
+            if d_url.startswith("postgres://"):
+                return d_url.replace("postgres://", "postgresql://", 1)
+            if d_url.startswith("postgresql+asyncpg://"):
+                return d_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return url
+
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = Field(min_length=16, default="change-this-development-secret")
     jwt_algorithm: str = "HS256"
