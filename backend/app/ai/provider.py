@@ -1,8 +1,13 @@
+import json
+import logging
 import os
 from collections.abc import Mapping
 from typing import Protocol
 
+import httpx
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class IncidentAnalysisResult(BaseModel):
@@ -206,11 +211,146 @@ class HeuristicContextualProvider:
         )
 
 
+class GeminiLLMProvider:
+    """Production-grade asynchronous Google Gemini LLM Provider.
+
+    Interfaces directly with Gemini models (e.g. gemini-3.6-flash)
+    via Google Generative Language REST API using httpx with automatic fallback to
+    HeuristicContextualProvider on network/quota errors.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-3.6-flash",
+        timeout_seconds: float = 20.0,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model.replace("models/", "")
+        self.timeout_seconds = timeout_seconds
+        self.fallback = HeuristicContextualProvider()
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    async def _generate_raw(self, prompt: str, json_mode: bool = False) -> str:
+        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        payload: dict[str, object] = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2},
+        }
+        if json_mode:
+            payload["generationConfig"] = {
+                "temperature": 0.2,
+                "response_mime_type": "application/json",
+            }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise ValueError("No candidates returned from Gemini API")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if not parts:
+                raise ValueError("No parts returned in Gemini candidate content")
+            return parts[0].get("text", "")
+
+    async def generate(self, prompt: str) -> str:
+        try:
+            return await self._generate_raw(prompt)
+        except Exception as exc:
+            logger.warning("Gemini generate failed, falling back to heuristic: %s", exc)
+            return await self.fallback.generate(prompt)
+
+    async def summarize(self, context: str) -> str:
+        try:
+            prompt = (
+                "Summarize the following operational telemetry incident context succinctly in 2-3 sentences:\n\n"
+                f"{context}"
+            )
+            return await self._generate_raw(prompt)
+        except Exception as exc:
+            logger.warning("Gemini summarize failed, falling back to heuristic: %s", exc)
+            return await self.fallback.summarize(context)
+
+    async def analyze(self, context: Mapping[str, object]) -> IncidentAnalysisResult:
+        try:
+            prompt = (
+                "You are an expert Site Reliability Engineer (SRE) performing AIOps root-cause incident analysis.\n"
+                "Analyze the following incident telemetry and context:\n"
+                f"{json.dumps(dict(context), default=str)}\n\n"
+                "Respond with a JSON object containing the exact keys:\n"
+                "- summary (string): Clear executive summary of the incident.\n"
+                "- probable_causes (list of strings): Root cause hypotheses labeled 'HYPOTHESIS 1: ...', 'HYPOTHESIS 2: ...'.\n"
+                "- evidence (list of objects with 'kind', 'fact', 'source'): Concrete evidence points extracted from alerts, logs, and telemetry.\n"
+                "- recommended_actions (list of strings): Step-by-step mitigation procedures.\n"
+                "- confidence (number between 0.0 and 1.0): Mathematical confidence score in the diagnosis.\n"
+                "- related_incidents (list of strings): Titles or references to related past incidents.\n"
+            )
+            raw = await self._generate_raw(prompt, json_mode=True)
+            data = json.loads(raw)
+            return IncidentAnalysisResult(
+                summary=data.get("summary", ""),
+                probable_causes=data.get("probable_causes", []),
+                evidence=data.get("evidence", []),
+                recommended_actions=data.get("recommended_actions", []),
+                confidence=float(data.get("confidence", 0.85)),
+                related_incidents=data.get("related_incidents", []),
+            )
+        except Exception as exc:
+            logger.warning("Gemini analyze failed, falling back to heuristic: %s", exc)
+            return await self.fallback.analyze(context)
+
+    async def draft_postmortem(self, context: Mapping[str, object]) -> PostmortemDraftResult:
+        try:
+            prompt = (
+                "You are a Principal Site Reliability Engineer. Write a comprehensive, blameless postmortem draft "
+                "for the following resolved incident:\n"
+                f"{json.dumps(dict(context), default=str)}\n\n"
+                "Respond with a JSON object containing the exact keys:\n"
+                "- summary (string): Executive overview of the outage.\n"
+                "- impact (string): Customer impact, latency, error rates, and degraded services.\n"
+                "- timeline (string): Sequence of events from detection to mitigation.\n"
+                "- root_cause (string): Technical root cause explanation.\n"
+                "- contributing_factors (string): Latent bugs, config errors, or capacity limits.\n"
+                "- resolution (string): Corrective actions applied during mitigation.\n"
+                "- preventive_actions (string): Concrete action items to prevent recurrence.\n"
+                "- lessons_learned (string): Architectural and operational takeaways.\n"
+            )
+            raw = await self._generate_raw(prompt, json_mode=True)
+            data = json.loads(raw)
+            return PostmortemDraftResult(
+                summary=data.get("summary", ""),
+                impact=data.get("impact", ""),
+                timeline=data.get("timeline", ""),
+                root_cause=data.get("root_cause", ""),
+                contributing_factors=data.get("contributing_factors", ""),
+                resolution=data.get("resolution", ""),
+                preventive_actions=data.get("preventive_actions", ""),
+                lessons_learned=data.get("lessons_learned", ""),
+            )
+        except Exception as exc:
+            logger.warning("Gemini draft_postmortem failed, falling back to heuristic: %s", exc)
+            return await self.fallback.draft_postmortem(context)
+
+
 def get_llm_provider() -> LLMProvider:
-    # Pluggable provider factory: can switch to OpenAI/Anthropic/Gemini when API key is provided
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key:
-        # In a deployment with OPENAI_API_KEY, can initialize OpenAILLMProvider
-        # For our zero-dependency robust setup, HeuristicContextualProvider guarantees 100% reliable interview demos
+    """Pluggable provider factory: Gemini, OpenAI, or deterministic Heuristic fallback."""
+    from app.core.config import settings
+
+    gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
+    provider = (settings.llm_provider or "fake").lower()
+
+    if (provider == "gemini" or gemini_key) and gemini_key:
+        return GeminiLLMProvider(
+            api_key=gemini_key,
+            model=settings.gemini_model,
+        )
+
+    openai_key = os.getenv("OPENAI_API_KEY") or (
+        settings.llm_api_key if provider == "openai" else None
+    )
+    if openai_key:
         return HeuristicContextualProvider()
+
     return HeuristicContextualProvider()

@@ -1,6 +1,7 @@
+import json
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,12 +15,29 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 14
-    cors_origins: list[AnyHttpUrl | str] = ["http://localhost:3000"]
+    cors_origins_raw: str = Field(default="http://localhost:3000", alias="cors_origins")
+
+    @property
+    def cors_origins(self) -> list[str]:
+        val = self.cors_origins_raw
+        if val.startswith("[") and val.endswith("]"):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    return [str(i) for i in parsed]
+            except Exception:
+                pass
+        return [i.strip() for i in val.split(",") if i.strip()]
+
     llm_provider: str = "fake"
     llm_api_key: str | None = None
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.6-flash"
     health_retention_days: int = 14
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore"
+    )
 
 
 @lru_cache

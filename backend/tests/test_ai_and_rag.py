@@ -95,3 +95,28 @@ def test_provider_factory() -> None:
     assert provider is not None
     assert hasattr(provider, "analyze")
     assert hasattr(provider, "draft_postmortem")
+
+
+@pytest.mark.asyncio
+async def test_gemini_provider_resilient_fallback() -> None:
+    from app.ai.provider import GeminiLLMProvider
+
+    # Initialize with invalid key and unreachable URL to verify graceful fallback
+    gemini = GeminiLLMProvider(api_key="invalid_test_key", model="models/gemini-3.6-flash")
+    assert gemini.model == "gemini-3.6-flash"
+
+    # Testing fallback behavior when Gemini API call fails
+    context = {
+        "title": "Fallback test",
+        "service_name": "Test Service",
+        "alerts": [],
+        "logs": [],
+        "runbooks": [],
+    }
+    result = await gemini.analyze(context)
+    assert result is not None
+    assert "Test Service" in result.summary
+
+    draft = await gemini.draft_postmortem(context)
+    assert draft is not None
+    assert "Test Service" in draft.summary
