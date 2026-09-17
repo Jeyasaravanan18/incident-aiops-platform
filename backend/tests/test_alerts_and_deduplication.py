@@ -1,7 +1,4 @@
-from datetime import UTC, datetime, timedelta
 import hashlib
-import json
-import pytest
 
 from app.domain.incidents import calculate_severity
 from app.models.enums import AlertSeverity, AlertStatus, Criticality, IncidentSeverity
@@ -13,8 +10,8 @@ def test_fingerprint_generation_reproducibility() -> None:
     service_slug = "payment-api"
     check_name = "http_response_time"
 
-    fp1 = hashlib.sha256(f"{source}:{service_slug}:{check_name}".encode("utf-8")).hexdigest()
-    fp2 = hashlib.sha256(f"{source}:{service_slug}:{check_name}".encode("utf-8")).hexdigest()
+    fp1 = hashlib.sha256(f"{source}:{service_slug}:{check_name}".encode()).hexdigest()
+    fp2 = hashlib.sha256(f"{source}:{service_slug}:{check_name}".encode()).hexdigest()
 
     assert fp1 == fp2
     assert len(fp1) == 64
@@ -26,7 +23,10 @@ def test_alert_severity_hierarchy() -> None:
     assert calculate_severity(AlertSeverity.CRITICAL, Criticality.CRITICAL) == IncidentSeverity.SEV2
 
     # Critical alert + Critical service with multiple affected services (score 6 + 1 = 7) -> SEV1
-    assert calculate_severity(AlertSeverity.CRITICAL, Criticality.CRITICAL, affected_services=2) == IncidentSeverity.SEV1
+    assert (
+        calculate_severity(AlertSeverity.CRITICAL, Criticality.CRITICAL, affected_services=2)
+        == IncidentSeverity.SEV1
+    )
 
     # High service + Critical alert (score 5) -> SEV2
     assert calculate_severity(AlertSeverity.CRITICAL, Criticality.HIGH) == IncidentSeverity.SEV2
