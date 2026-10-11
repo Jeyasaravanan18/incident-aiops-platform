@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import UserAuth, idempotency_key, require_permission
 from app.core.database import get_session
 from app.core.errors import AppError
+from app.core.redis import rate_limiter
 from app.domain.alerts import compute_alert_fingerprint
 from app.domain.idempotency import (
     get_idempotent_response,
@@ -110,7 +111,12 @@ async def list_alerts(
     ]
 
 
-@router.post("", response_model=AlertRead, status_code=201)
+@router.post(
+    "",
+    response_model=AlertRead,
+    status_code=201,
+    dependencies=[Depends(rate_limiter("alert:ingest", max_requests=120, window_seconds=60))],
+)
 async def ingest_alert(
     payload: AlertCreate,
     session: AsyncSession = Depends(get_session),

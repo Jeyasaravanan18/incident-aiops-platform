@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.errors import AppError
+from app.core.redis import rate_limiter
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -58,7 +59,11 @@ async def register(
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limiter("auth:login", max_requests=20, window_seconds=60))],
+)
 async def login(
     payload: LoginRequest, session: AsyncSession = Depends(get_session)
 ) -> TokenResponse:
