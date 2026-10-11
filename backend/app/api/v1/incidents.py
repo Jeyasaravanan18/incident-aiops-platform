@@ -295,7 +295,7 @@ async def transition_incident(
     session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("incident:update")),
 ) -> IncidentRead:
-    incident = await IncidentRepository.get_by_id(session, incident_id)
+    incident = await IncidentRepository.get_by_id_for_update(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 

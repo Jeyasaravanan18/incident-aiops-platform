@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.alert import Alert
@@ -36,6 +36,23 @@ class IncidentRepository:
     @staticmethod
     async def get_by_id(session: AsyncSession, incident_id: UUID) -> Incident | None:
         return await session.get(Incident, incident_id)
+
+    @staticmethod
+    async def get_by_id_for_update(session: AsyncSession, incident_id: UUID) -> Incident | None:
+        """Fetches an incident with row-level SELECT ... FOR UPDATE lock to serialize status transitions."""
+        stmt = select(Incident).where(Incident.id == incident_id).with_for_update()
+        return await session.scalar(stmt)
+
+    @staticmethod
+    async def acquire_service_advisory_lock(session: AsyncSession, service_id: UUID) -> None:
+        """Acquires a transaction-scoped PostgreSQL advisory lock using hashtext(service_id).
+
+        This serializes concurrent alert ingestion for a given service, ensuring
+        that simultaneous alert storms create exactly one active incident.
+        Automatically released when transaction commits or rolls back.
+        """
+        stmt = text("SELECT pg_advisory_xact_lock(hashtext(CAST(:service_id AS text)))")
+        await session.execute(stmt, {"service_id": str(service_id)})
 
     @staticmethod
     async def find_active_for_service(session: AsyncSession, service_id: UUID) -> Incident | None:

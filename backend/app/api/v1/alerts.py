@@ -18,6 +18,7 @@ from app.models.enums import (
     AlertSeverity,
     AlertStatus,
     IncidentSeverity,
+    IncidentStatus,
 )
 from app.repositories.alert_repo import AlertRepository
 from app.repositories.incident_repo import IncidentRepository
@@ -135,68 +136,41 @@ async def ingest_alert(
         title=payload.title,
         metadata_json=payload.metadata,
     )
-
-    # Deduplication check
-    existing = await AlertRepository.get_by_fingerprint(session, fingerprint)
-    if existing:
-        new_status = (
-            AlertStatus.OPEN
-            if existing.status in (AlertStatus.RESOLVED, AlertStatus.SUPPRESSED)
-            else existing.status
-        )
-        updated = await AlertRepository.increment_occurrence(session, existing, new_status)
-        await store_idempotent_response(
-            session,
-            key,
-            "alert_ingest",
-            request_hash,
-            {"alert_id": str(updated.id), "deduplicated": True},
-        )
-        await websocket_manager.broadcast(
-            "dashboard",
-            {
-                "type": "AlertDeduplicated",
-                "alert_id": str(updated.id),
-                "fingerprint": updated.fingerprint,
-                "occurrence_count": updated.occurrence_count,
-            },
-        )
-        return await _enrich_alert(session, updated)
-
-    # 2. Check for active open incident on the same service to correlate
-    active_incident = await IncidentRepository.find_active_for_service(session, payload.service_id)
-
-    incident_id = active_incident.id if active_incident else None
     alert_severity = (
         AlertSeverity(payload.severity) if isinstance(payload.severity, str) else payload.severity
     )
 
-    alert = await AlertRepository.create_alert(
-        session=session,
-        service_id=payload.service_id,
-        incident_id=incident_id,
-        source=payload.source,
-        severity=alert_severity,
-        title=payload.title,
-        description=payload.description,
-        fingerprint=fingerprint,
-        metadata_json={**payload.metadata, "idempotency_key": key},
-        first_seen=now,
-        last_seen=now,
-        first_seen_at=now,
-        last_seen_at=now,
-        occurrence_count=1,
-        status=AlertStatus.OPEN,
-    )
+    # 2. Acquire transaction advisory lock on service_id to serialize alert storms & prevent duplicate incidents
+    await IncidentRepository.acquire_service_advisory_lock(session, payload.service_id)
 
-    if active_incident is not None:
+    # 3. Check for active open incident on the same service or auto-create one for alert storm
+    active_incident = await IncidentRepository.find_active_for_service(session, payload.service_id)
+    if active_incident is None:
+        calc_sev = calculate_severity(alert_severity, service.criticality)
+        active_incident = await IncidentRepository.create_incident(
+            session=session,
+            service_id=payload.service_id,
+            title=f"Incident: {payload.title}",
+            description=f"Auto-created incident from alert storm ({payload.title})",
+            severity=calc_sev,
+            status=IncidentStatus.TRIGGERED,
+            detected_at=now,
+        )
+        await IncidentRepository.add_timeline_event(
+            session=session,
+            incident_id=active_incident.id,
+            event_type="IncidentAutoCreated",
+            message=f"Incident auto-created from alert storm: '{payload.title}' ({alert_severity.value})",
+            actor_id=None,
+            metadata_json={"alert_title": payload.title, "severity": alert_severity.value},
+        )
+    else:
         new_severity = calculate_severity(alert_severity, service.criticality)
         curr_sev = (
             IncidentSeverity(active_incident.severity)
             if isinstance(active_incident.severity, str)
             else active_incident.severity
         )
-        # Escalate incident severity if alert severity is higher
         sev_rank = {
             IncidentSeverity.SEV4: 4,
             IncidentSeverity.SEV3: 3,
@@ -208,14 +182,49 @@ async def ingest_alert(
                 session, active_incident, {"severity": new_severity}
             )
 
-        await IncidentRepository.add_timeline_event(
-            session=session,
-            incident_id=active_incident.id,
-            event_type="AlertCorrelated",
-            message=f"Correlated alert: '{payload.title}' ({alert_severity.value})",
-            actor_id=None,
-            metadata_json={"alert_id": str(alert.id), "fingerprint": fingerprint},
+    incident_id = active_incident.id
+
+    # 4. Atomic upsert alert (ON CONFLICT DO UPDATE)
+    alert, is_inserted = await AlertRepository.upsert_alert(
+        session=session,
+        service_id=payload.service_id,
+        incident_id=incident_id,
+        source=payload.source,
+        severity=alert_severity,
+        title=payload.title,
+        description=payload.description,
+        fingerprint=fingerprint,
+        metadata_json={**payload.metadata, "idempotency_key": key},
+    )
+
+    if not is_inserted:
+        await store_idempotent_response(
+            session,
+            key,
+            "alert_ingest",
+            request_hash,
+            {"alert_id": str(alert.id), "deduplicated": True},
         )
+        await websocket_manager.broadcast(
+            "dashboard",
+            {
+                "type": "AlertDeduplicated",
+                "alert_id": str(alert.id),
+                "fingerprint": alert.fingerprint,
+                "occurrence_count": alert.occurrence_count,
+            },
+        )
+        return await _enrich_alert(session, alert)
+
+    # Correlate newly inserted alert with timeline event
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=active_incident.id,
+        event_type="AlertCorrelated",
+        message=f"Correlated alert: '{payload.title}' ({alert_severity.value})",
+        actor_id=None,
+        metadata_json={"alert_id": str(alert.id), "fingerprint": fingerprint},
+    )
 
     await store_idempotent_response(
         session,
