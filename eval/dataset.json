@@ -1,0 +1,590 @@
+[
+  {
+    "query_id": "eval-01",
+    "service_slug": "auth-service",
+    "service_id": "2e916a14-824c-4134-b924-14a553fc8c4e",
+    "service_name": "Auth & Token Service",
+    "incident_title": "JWT Signature Validation Replay Storm",
+    "incident_description": "High rate of expired refresh token replay attempts causing auth rejection spikes and 401 storms.",
+    "query_text": "JWT Signature Validation Replay Storm High rate of expired refresh token replay attempts causing auth rejection spikes and 401 storms.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "38ae45c9-8e5a-4994-88a8-9e08c843974f",
+    "ground_truth_chunk_ids": [
+      "074579fa-bf31-4890-bfb5-cf39fd0f3cee"
+    ]
+  },
+  {
+    "query_id": "eval-02",
+    "service_slug": "postgres-cluster",
+    "service_id": "e6fbaef8-a789-4218-9171-39c566a95fdf",
+    "service_name": "Postgres Database Cluster",
+    "incident_title": "Postgres Connection Pool Exhaustion max_connections Exceeded",
+    "incident_description": "Client applications receiving FATAL: remaining connection slots are reserved for non-replication superuser connections.",
+    "query_text": "Postgres Connection Pool Exhaustion max_connections Exceeded Client applications receiving FATAL: remaining connection slots are reserved for non-replication superuser connections.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "25ad11ba-7a52-4041-9b60-7e67e800e38d",
+    "ground_truth_chunk_ids": [
+      "af71b10a-dfa5-4152-9f3e-6914cacefadb"
+    ]
+  },
+  {
+    "query_id": "eval-03",
+    "service_slug": "payment-api",
+    "service_id": "781b7a3a-1eb6-428c-95b4-0a05a619becf",
+    "service_name": "Payment Gateway API",
+    "incident_title": "Stripe Webhook Signature Verification Clock Skew Failure",
+    "incident_description": "Incoming Stripe payment webhooks failing HMAC signature verification with timestamp outside tolerance window.",
+    "query_text": "Stripe Webhook Signature Verification Clock Skew Failure Incoming Stripe payment webhooks failing HMAC signature verification with timestamp outside tolerance window.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "312a7378-dd1c-4ea3-86e3-1895e89d7d55",
+    "ground_truth_chunk_ids": [
+      "3fe6e3a7-3efc-4c1e-815d-011863dc3506"
+    ]
+  },
+  {
+    "query_id": "eval-04",
+    "service_slug": "order-service",
+    "service_id": "806c6aab-bb2c-43a1-ba53-ceac78db6590",
+    "service_name": "Order Processing Service",
+    "incident_title": "Kafka Consumer Group Rebalance Storm on Partition Lag",
+    "incident_description": "Order consumers repeatedly dropping out of consumer group due to max.poll.interval.ms timeout during database slow queries.",
+    "query_text": "Kafka Consumer Group Rebalance Storm on Partition Lag Order consumers repeatedly dropping out of consumer group due to max.poll.interval.ms timeout during database slow queries.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "cc66d38d-7265-4292-ab1a-6f01669c3b8d",
+    "ground_truth_chunk_ids": [
+      "5c50a1be-2c36-4be7-9f32-25ced5ce8f04"
+    ]
+  },
+  {
+    "query_id": "eval-05",
+    "service_slug": "redis-cache",
+    "service_id": "9e8a1fcc-6f34-4111-b32f-ee5e511576ca",
+    "service_name": "Redis Distributed Cache",
+    "incident_title": "Redis Eviction Storm and Memory Pressure Under Allkeys-LRU",
+    "incident_description": "Redis memory reaching maxmemory limit, eviction count skyrocketing, latency spiking from sub-millisecond to 120ms.",
+    "query_text": "Redis Eviction Storm and Memory Pressure Under Allkeys-LRU Redis memory reaching maxmemory limit, eviction count skyrocketing, latency spiking from sub-millisecond to 120ms.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "a2dc9879-2d6b-420d-be8a-8faf41435675",
+    "ground_truth_chunk_ids": [
+      "5ce2edc2-2bd9-42b3-8ed4-db9ca28b1476"
+    ]
+  },
+  {
+    "query_id": "eval-06",
+    "service_slug": "search-engine",
+    "service_id": "c618bad9-ab68-412d-a546-e8bed841bafd",
+    "service_name": "Search & Indexing Engine",
+    "incident_title": "Elasticsearch Unassigned Shards and Red Cluster State",
+    "incident_description": "Elasticsearch cluster state RED due to disk watermark exceeded on data nodes, blocking search and indexing operations.",
+    "query_text": "Elasticsearch Unassigned Shards and Red Cluster State Elasticsearch cluster state RED due to disk watermark exceeded on data nodes, blocking search and indexing operations.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "c94e5471-616a-46e7-9de4-a78852fb866a",
+    "ground_truth_chunk_ids": [
+      "3345c255-da73-4ee9-9e20-bbaaac03284c"
+    ]
+  },
+  {
+    "query_id": "eval-07",
+    "service_slug": "ingress-controller",
+    "service_id": "443a2001-dc97-45d4-bdcf-5b997f4100a3",
+    "service_name": "Kubernetes Ingress Controller",
+    "incident_title": "NGINX Ingress 504 Gateway Timeout Cascade",
+    "incident_description": "Client traffic receiving 504 Gateway Timeout on checkout and cart endpoints while ingress CPU remains below 40%.",
+    "query_text": "NGINX Ingress 504 Gateway Timeout Cascade Client traffic receiving 504 Gateway Timeout on checkout and cart endpoints while ingress CPU remains below 40%.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "ad603237-3da7-4159-9f16-5350f838cf4e",
+    "ground_truth_chunk_ids": [
+      "6161cbaa-ec9b-426c-87b6-a93392c78c1a"
+    ]
+  },
+  {
+    "query_id": "eval-08",
+    "service_slug": "inventory-service",
+    "service_id": "f4b51d85-c331-4cc9-bcf8-0f189b57aca7",
+    "service_name": "Inventory Catalog Service",
+    "incident_title": "PostgreSQL Row Lock Contention on Hot SKU Stock Decrement",
+    "incident_description": "High transaction rollback rate and latency spike to 4500ms on flash sale checkout updating single SKU quantity.",
+    "query_text": "PostgreSQL Row Lock Contention on Hot SKU Stock Decrement High transaction rollback rate and latency spike to 4500ms on flash sale checkout updating single SKU quantity.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "7aa4125d-4423-4b6e-b8c0-5c43334358b7",
+    "ground_truth_chunk_ids": [
+      "75fd6223-6707-414c-bdea-95972edf0aec"
+    ]
+  },
+  {
+    "query_id": "eval-09",
+    "service_slug": "api-gateway",
+    "service_id": "a1757135-b75f-4ba4-bd89-6f402cbd13bf",
+    "service_name": "API Gateway Core",
+    "incident_title": "Rate Limiting Starvation and 429 Cascades on Internal RPC",
+    "incident_description": "Internal microservices receiving 429 Too Many Requests from API Gateway rate limiter after upstream IP spoofing.",
+    "query_text": "Rate Limiting Starvation and 429 Cascades on Internal RPC Internal microservices receiving 429 Too Many Requests from API Gateway rate limiter after upstream IP spoofing.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "34e00590-4d53-4bc3-98cb-09a208d8fadc",
+    "ground_truth_chunk_ids": [
+      "7307f670-6dee-4b0c-ab3b-c8deed913aa5"
+    ]
+  },
+  {
+    "query_id": "eval-10",
+    "service_slug": "notification-service",
+    "service_id": "f7f37331-f243-46e8-abd5-8576e6c82045",
+    "service_name": "Notification Dispatcher",
+    "incident_title": "SendGrid Email Dispatch Rate Limit and Queue Backlog",
+    "incident_description": "Outbound email delivery queue exceeding 150,000 pending tasks with SendGrid returning 429 Too Many Requests.",
+    "query_text": "SendGrid Email Dispatch Rate Limit and Queue Backlog Outbound email delivery queue exceeding 150,000 pending tasks with SendGrid returning 429 Too Many Requests.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "9b074bcd-0101-430d-8ad8-7d776084b0f1",
+    "ground_truth_chunk_ids": [
+      "064cc0c5-8767-444a-923f-6b1e302ed5c7"
+    ]
+  },
+  {
+    "query_id": "eval-11",
+    "service_slug": "user-service",
+    "service_id": "88042ec0-4fd4-4c96-9304-987a09084af6",
+    "service_name": "User Profile Service",
+    "incident_title": "Argon2id CPU Starvation on Bulk User Password Verification",
+    "incident_description": "Kubernetes pods hitting 100% CPU limits due to batch login attempts invoking resource-intensive Argon2id password hashing.",
+    "query_text": "Argon2id CPU Starvation on Bulk User Password Verification Kubernetes pods hitting 100% CPU limits due to batch login attempts invoking resource-intensive Argon2id password hashing.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "6aa2661f-8389-4f5f-910d-3b94e38b4072",
+    "ground_truth_chunk_ids": [
+      "af6f563c-244e-49d9-bf4b-5ecc356fbd65"
+    ]
+  },
+  {
+    "query_id": "eval-12",
+    "service_slug": "storage-service",
+    "service_id": "4ecd900c-052e-4d04-a31c-74649eb0fc5c",
+    "service_name": "File Storage Subsystem",
+    "incident_title": "S3 503 Slow Down Request Rate Exceeded on Single Prefix",
+    "incident_description": "Asset upload pipeline throwing botocore 503 Slow Down errors when saving customer invoice PDFs.",
+    "query_text": "S3 503 Slow Down Request Rate Exceeded on Single Prefix Asset upload pipeline throwing botocore 503 Slow Down errors when saving customer invoice PDFs.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "e2966a5a-5622-4110-977d-a33a3351b456",
+    "ground_truth_chunk_ids": [
+      "7b237ec5-cda1-4c28-91bf-166e38759daf"
+    ]
+  },
+  {
+    "query_id": "eval-13",
+    "service_slug": "worker-service",
+    "service_id": "6f5ac053-6cd4-403c-af88-b73c4f744c93",
+    "service_name": "Background Worker Cluster",
+    "incident_title": "Celery Worker OOMKilled Exit Code 137 on Large Report Generation",
+    "incident_description": "Worker pods terminating with exit code 137 (SIGKILL) while parsing multi-gigabyte CSV exports.",
+    "query_text": "Celery Worker OOMKilled Exit Code 137 on Large Report Generation Worker pods terminating with exit code 137 (SIGKILL) while parsing multi-gigabyte CSV exports.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "10392b7b-32f2-4422-b641-226a2c25b9d6",
+    "ground_truth_chunk_ids": [
+      "4f4b60ff-338e-4b7b-90d7-e5f7161a9389"
+    ]
+  },
+  {
+    "query_id": "eval-14",
+    "service_slug": "k8s-cluster",
+    "service_id": "96570703-e8be-4ccd-8e6c-7c4943578224",
+    "service_name": "Kubernetes Cluster Core",
+    "incident_title": "Pod CrashLoopBackOff Due to Missing ConfigMap Secret Key",
+    "incident_description": "Pods failing readiness and liveness probes immediately upon startup with CreateContainerConfigError.",
+    "query_text": "Pod CrashLoopBackOff Due to Missing ConfigMap Secret Key Pods failing readiness and liveness probes immediately upon startup with CreateContainerConfigError.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "61b456af-7bd2-46d9-aae3-379168b56058",
+    "ground_truth_chunk_ids": [
+      "e83ae139-6cfd-4ee7-9aaa-bee9accde85e"
+    ]
+  },
+  {
+    "query_id": "eval-15",
+    "service_slug": "dns-service",
+    "service_id": "9162055f-7992-4c74-abd9-2e658669add2",
+    "service_name": "DNS and Routing Service",
+    "incident_title": "CoreDNS Query Timeout and NXDOMAIN Errors Under Peak Load",
+    "incident_description": "Inter-service RPCs intermittently failing with dns resolution timeout and lookup nxdomain.",
+    "query_text": "CoreDNS Query Timeout and NXDOMAIN Errors Under Peak Load Inter-service RPCs intermittently failing with dns resolution timeout and lookup nxdomain.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "0ecf15a2-5cb4-4c8e-8dc9-5292547b6b0a",
+    "ground_truth_chunk_ids": [
+      "84ecf4e4-da6e-4b5d-8263-c224e71df5f5"
+    ]
+  },
+  {
+    "query_id": "eval-16",
+    "service_slug": "billing-service",
+    "service_id": "4448a047-fbc0-41b8-9a30-e2e3d7865a49",
+    "service_name": "Billing & Subscription Engine",
+    "incident_title": "Duplicate Invoicing Caused by Missing Idempotency Key",
+    "incident_description": "Customers charged twice on network retry during checkout when payment endpoint was invoked multiple times.",
+    "query_text": "Duplicate Invoicing Caused by Missing Idempotency Key Customers charged twice on network retry during checkout when payment endpoint was invoked multiple times.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "86911869-6e5e-4f4b-a305-216368eef974",
+    "ground_truth_chunk_ids": [
+      "e60bea25-f37c-4fa0-af30-fb11e9735de8"
+    ]
+  },
+  {
+    "query_id": "eval-17",
+    "service_slug": "rabbitmq-broker",
+    "service_id": "079aa53b-18aa-484a-a4e4-216a53b000ec",
+    "service_name": "Message Broker RabbitMQ",
+    "incident_title": "RabbitMQ Unacknowledged Message Memory Alarm Blocking Producers",
+    "incident_description": "RabbitMQ blocking socket connections from publishers due to vm_memory_high_watermark alarm triggered.",
+    "query_text": "RabbitMQ Unacknowledged Message Memory Alarm Blocking Producers RabbitMQ blocking socket connections from publishers due to vm_memory_high_watermark alarm triggered.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "9d7e5a4e-924d-442c-8714-43c9666d8e53",
+    "ground_truth_chunk_ids": [
+      "91029397-3bb3-4a85-87f6-c6c5ef0d7504"
+    ]
+  },
+  {
+    "query_id": "eval-18",
+    "service_slug": "postgres-cluster",
+    "service_id": "e6fbaef8-a789-4218-9171-39c566a95fdf",
+    "service_name": "Postgres Database Cluster",
+    "incident_title": "PostgreSQL Table Bloat and Autovacuum Freeze Lag",
+    "incident_description": "Alert: transaction ID wraparound impending, autovacuum failing to complete on high-write incident_events table.",
+    "query_text": "PostgreSQL Table Bloat and Autovacuum Freeze Lag Alert: transaction ID wraparound impending, autovacuum failing to complete on high-write incident_events table.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "b4010e45-676e-404c-b514-ee064c042611",
+    "ground_truth_chunk_ids": [
+      "4011cf80-e00e-4a05-9a76-6381c067bb43"
+    ]
+  },
+  {
+    "query_id": "eval-19",
+    "service_slug": "ssl-infrastructure",
+    "service_id": "450657cb-6e98-40e1-ae5b-ed0a19e935d7",
+    "service_name": "Security & SSL Infrastructure",
+    "incident_title": "TLS Leaf Certificate Expiration Handshake Failure",
+    "incident_description": "Clients receiving SEC_ERROR_EXPIRED_CERTIFICATE on api.domain.com during SSL negotiation.",
+    "query_text": "TLS Leaf Certificate Expiration Handshake Failure Clients receiving SEC_ERROR_EXPIRED_CERTIFICATE on api.domain.com during SSL negotiation.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "470c7cdc-70f9-400b-bb09-0abad70033af",
+    "ground_truth_chunk_ids": [
+      "9bfeec7a-f9ec-4d16-9e98-0f4579af1fa0"
+    ]
+  },
+  {
+    "query_id": "eval-20",
+    "service_slug": "websocket-hub",
+    "service_id": "a094b2b1-8ee6-4c40-9916-1c3e9e0f5679",
+    "service_name": "WebSocket Notification Hub",
+    "incident_title": "WebSocket Connection Dropping Storm on AWS ALB Idle Timeout",
+    "incident_description": "Thousands of active browser clients disconnecting simultaneously every 60 seconds and reconnecting in thundering herd.",
+    "query_text": "WebSocket Connection Dropping Storm on AWS ALB Idle Timeout Thousands of active browser clients disconnecting simultaneously every 60 seconds and reconnecting in thundering herd.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "3bc04155-d523-4d67-820b-535dc0b937b7",
+    "ground_truth_chunk_ids": [
+      "3de19602-44ff-4346-9172-6da4ebc5e052"
+    ]
+  },
+  {
+    "query_id": "eval-21",
+    "service_slug": "search-engine",
+    "service_id": "c618bad9-ab68-412d-a546-e8bed841bafd",
+    "service_name": "Search & Indexing Engine",
+    "incident_title": "Full-Text Search tsvector GIN Index Degradation",
+    "incident_description": "Incident log search query latency spiking from 15ms to 1200ms following massive 500,000 log row ingestion.",
+    "query_text": "Full-Text Search tsvector GIN Index Degradation Incident log search query latency spiking from 15ms to 1200ms following massive 500,000 log row ingestion.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "92cd01d6-1082-4f9b-b0d7-c2d537faa5ea",
+    "ground_truth_chunk_ids": [
+      "a66e4f32-a132-4601-985d-2b21791f03b0"
+    ]
+  },
+  {
+    "query_id": "eval-22",
+    "service_slug": "auth-service",
+    "service_id": "2e916a14-824c-4134-b924-14a553fc8c4e",
+    "service_name": "Auth & Token Service",
+    "incident_title": "Distributed Session Desynchronization on Redis Pub/Sub Outage",
+    "incident_description": "User logout events not propagating across cluster nodes, allowing invalidated JWT tokens to remain active on other instances.",
+    "query_text": "Distributed Session Desynchronization on Redis Pub/Sub Outage User logout events not propagating across cluster nodes, allowing invalidated JWT tokens to remain active on other instances.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "367f7a13-4797-440e-a4ba-77bb8bd72007",
+    "ground_truth_chunk_ids": [
+      "a59c8ca5-3281-41ee-8a0d-0ea4978ead83"
+    ]
+  },
+  {
+    "query_id": "eval-23",
+    "service_slug": "order-service",
+    "service_id": "806c6aab-bb2c-43a1-ba53-ceac78db6590",
+    "service_name": "Order Processing Service",
+    "incident_title": "Order Processing Deadlock on Cross-Table Update Order",
+    "incident_description": "Concurrent order payment and warehouse allocation transactions aborting with deadlock detected error in PostgreSQL.",
+    "query_text": "Order Processing Deadlock on Cross-Table Update Order Concurrent order payment and warehouse allocation transactions aborting with deadlock detected error in PostgreSQL.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "58268233-bdc4-4fb6-826c-11e558dc8720",
+    "ground_truth_chunk_ids": [
+      "13f6c630-d267-4855-a8a2-b3c85b58a697"
+    ]
+  },
+  {
+    "query_id": "eval-24",
+    "service_slug": "payment-api",
+    "service_id": "781b7a3a-1eb6-428c-95b4-0a05a619becf",
+    "service_name": "Payment Gateway API",
+    "incident_title": "External Provider Gateway 502 Bad Gateway Spike",
+    "incident_description": "Third-party payment processor throwing 502 Bad Gateway during seasonal traffic surge.",
+    "query_text": "External Provider Gateway 502 Bad Gateway Spike Third-party payment processor throwing 502 Bad Gateway during seasonal traffic surge.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "1d4ee4d1-663c-44f5-9ab4-f6c983a23aa5",
+    "ground_truth_chunk_ids": [
+      "610d99c0-dd12-4393-9804-afd3b43b2ea1"
+    ]
+  },
+  {
+    "query_id": "eval-25",
+    "service_slug": "worker-service",
+    "service_id": "6f5ac053-6cd4-403c-af88-b73c4f744c93",
+    "service_name": "Background Worker Cluster",
+    "incident_title": "Celery Beat Scheduler Stalling Cron Healthcheck Probes",
+    "incident_description": "Periodic healthchecks stopped executing, celery beat process unresponsive in single-threaded loop.",
+    "query_text": "Celery Beat Scheduler Stalling Cron Healthcheck Probes Periodic healthchecks stopped executing, celery beat process unresponsive in single-threaded loop.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "d5c1b533-393a-4785-9b3f-d53dc7e60cc9",
+    "ground_truth_chunk_ids": [
+      "c416775d-2629-4b4a-b431-4157951f0a5a"
+    ]
+  },
+  {
+    "query_id": "eval-26",
+    "service_slug": "ingress-controller",
+    "service_id": "443a2001-dc97-45d4-bdcf-5b997f4100a3",
+    "service_name": "Kubernetes Ingress Controller",
+    "incident_title": "Linux File Descriptor EMFILE Too Many Open Files",
+    "incident_description": "Ingress controller failing new socket connections with socket() failed (24: Too many open files).",
+    "query_text": "Linux File Descriptor EMFILE Too Many Open Files Ingress controller failing new socket connections with socket() failed (24: Too many open files).",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "582e2c3c-23ad-4054-8581-ad5fb5661b77",
+    "ground_truth_chunk_ids": [
+      "7d07fb78-7b41-471f-b3d7-a36517e01966"
+    ]
+  },
+  {
+    "query_id": "eval-27",
+    "service_slug": "postgres-cluster",
+    "service_id": "e6fbaef8-a789-4218-9171-39c566a95fdf",
+    "service_name": "Postgres Database Cluster",
+    "incident_title": "Postgres Streaming Replication Lag Exceeding 500 Megabytes",
+    "incident_description": "Read replica lag increasing continuously, readers serving stale data during heavy database write batch.",
+    "query_text": "Postgres Streaming Replication Lag Exceeding 500 Megabytes Read replica lag increasing continuously, readers serving stale data during heavy database write batch.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "2276faf5-2339-4e64-8872-7fd60a4681c4",
+    "ground_truth_chunk_ids": [
+      "ca09667d-99d4-4620-af98-f2eb6229e3f6"
+    ]
+  },
+  {
+    "query_id": "eval-28",
+    "service_slug": "storage-service",
+    "service_id": "4ecd900c-052e-4d04-a31c-74649eb0fc5c",
+    "service_name": "File Storage Subsystem",
+    "incident_title": "Disk Inode Exhaustion Despite 70% Free Disk Space",
+    "incident_description": "Application throwing No space left on device when writing logs, despite df -h showing 250GB available.",
+    "query_text": "Disk Inode Exhaustion Despite 70% Free Disk Space Application throwing No space left on device when writing logs, despite df -h showing 250GB available.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "23514746-8a4c-432a-9bab-c51f854fd283",
+    "ground_truth_chunk_ids": [
+      "c500ee46-141c-4e2b-afbe-6cb37aa50c36"
+    ]
+  },
+  {
+    "query_id": "eval-29",
+    "service_slug": "notification-service",
+    "service_id": "f7f37331-f243-46e8-abd5-8576e6c82045",
+    "service_name": "Notification Dispatcher",
+    "incident_title": "Twilio SMS Delivery Webhook Queue Flood",
+    "incident_description": "Twilio SMS status callback webhooks overwhelming notification worker pods, causing 503 Service Unavailable.",
+    "query_text": "Twilio SMS Delivery Webhook Queue Flood Twilio SMS status callback webhooks overwhelming notification worker pods, causing 503 Service Unavailable.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "3a02ce05-21cc-4a4c-9eb0-2e57de895503",
+    "ground_truth_chunk_ids": [
+      "28b0765f-32cf-4e28-86f7-148061f6faac"
+    ]
+  },
+  {
+    "query_id": "eval-30",
+    "service_slug": "inventory-service",
+    "service_id": "f4b51d85-c331-4cc9-bcf8-0f189b57aca7",
+    "service_name": "Inventory Catalog Service",
+    "incident_title": "Redis Cache Stampede on Catalog Master Key Expiration",
+    "incident_description": "All backend instances hitting PostgreSQL simultaneously for product catalog upon TTL expiration, spiking DB CPU to 100%.",
+    "query_text": "Redis Cache Stampede on Catalog Master Key Expiration All backend instances hitting PostgreSQL simultaneously for product catalog upon TTL expiration, spiking DB CPU to 100%.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "f314fa2f-c0cc-4fb6-bf3a-e06ecc48bfdb",
+    "ground_truth_chunk_ids": [
+      "64b07cf9-95cd-409b-aaaf-797c746a904d"
+    ]
+  },
+  {
+    "query_id": "eval-31",
+    "service_slug": "api-gateway",
+    "service_id": "a1757135-b75f-4ba4-bd89-6f402cbd13bf",
+    "service_name": "API Gateway Core",
+    "incident_title": "CORS Preflight Options Request Overhead Saturation",
+    "incident_description": "Browser OPTIONS preflight requests accounting for 60% of total API Gateway traffic, degrading edge latency.",
+    "query_text": "CORS Preflight Options Request Overhead Saturation Browser OPTIONS preflight requests accounting for 60% of total API Gateway traffic, degrading edge latency.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "23312468-889e-4f24-b4ad-c79b14356079",
+    "ground_truth_chunk_ids": [
+      "b02b1d6d-483d-4b0d-8dee-d19190424768"
+    ]
+  },
+  {
+    "query_id": "eval-32",
+    "service_slug": "ssl-infrastructure",
+    "service_id": "450657cb-6e98-40e1-ae5b-ed0a19e935d7",
+    "service_name": "Security & SSL Infrastructure",
+    "incident_title": "AWS IAM Instance Role Credential Expiration During Auto-Deployment",
+    "incident_description": "CI/CD deployment runner failing with botocore ClientError: The security token included in the request is expired.",
+    "query_text": "AWS IAM Instance Role Credential Expiration During Auto-Deployment CI/CD deployment runner failing with botocore ClientError: The security token included in the request is expired.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "4ceaa49c-35d7-46b1-84ef-bd3fd40f7cf5",
+    "ground_truth_chunk_ids": [
+      "a71221e7-4411-42ac-8c9d-64a8ca9ae7b5"
+    ]
+  },
+  {
+    "query_id": "eval-33",
+    "service_slug": "search-engine",
+    "service_id": "c618bad9-ab68-412d-a546-e8bed841bafd",
+    "service_name": "Search & Indexing Engine",
+    "incident_title": "HNSW Vector Index Cosine Distance Metric Inconsistency",
+    "incident_description": "Semantic vector search returning irrelevant results when vectors are unnormalized under vector_cosine_ops.",
+    "query_text": "HNSW Vector Index Cosine Distance Metric Inconsistency Semantic vector search returning irrelevant results when vectors are unnormalized under vector_cosine_ops.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "161b7c9d-5e16-4d80-a6a6-95e66cc84c6d",
+    "ground_truth_chunk_ids": [
+      "d99940ac-b5b7-4b71-a596-ec56ea3bf5bf"
+    ]
+  },
+  {
+    "query_id": "eval-34",
+    "service_slug": "user-service",
+    "service_id": "88042ec0-4fd4-4c96-9304-987a09084af6",
+    "service_name": "User Profile Service",
+    "incident_title": "User Account Enumeration Vulnerability on Password Reset",
+    "incident_description": "Security audit finding: Response timing discrepancy on /api/v1/auth/forgot-password reveals valid vs invalid emails.",
+    "query_text": "User Account Enumeration Vulnerability on Password Reset Security audit finding: Response timing discrepancy on /api/v1/auth/forgot-password reveals valid vs invalid emails.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "bbe3e3c8-d4d9-42e8-9a56-bcc73f2bf022",
+    "ground_truth_chunk_ids": [
+      "ce82f23e-7b99-4bda-9368-81afcfee4245"
+    ]
+  },
+  {
+    "query_id": "eval-35",
+    "service_slug": "billing-service",
+    "service_id": "4448a047-fbc0-41b8-9a30-e2e3d7865a49",
+    "service_name": "Billing & Subscription Engine",
+    "incident_title": "Floating-Point Rounding Error in Currency Tax Calculation",
+    "incident_description": "Financial reconciliation discrepancy of $0.01 on multi-item enterprise invoices due to IEEE 754 float arithmetic.",
+    "query_text": "Floating-Point Rounding Error in Currency Tax Calculation Financial reconciliation discrepancy of $0.01 on multi-item enterprise invoices due to IEEE 754 float arithmetic.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "8becd297-5a73-4fbe-99a0-f4f8b7dfb8bc",
+    "ground_truth_chunk_ids": [
+      "64f4b1cf-c88e-43a0-819f-c5b06f242898"
+    ]
+  },
+  {
+    "query_id": "eval-36",
+    "service_slug": "k8s-cluster",
+    "service_id": "96570703-e8be-4ccd-8e6c-7c4943578224",
+    "service_name": "Kubernetes Cluster Core",
+    "incident_title": "Kubernetes Node Disk Pressure and Image Eviction",
+    "incident_description": "Cluster nodes marked NotReady with KubeletHasDiskPressure, pods getting evicted across multiple namespaces.",
+    "query_text": "Kubernetes Node Disk Pressure and Image Eviction Cluster nodes marked NotReady with KubeletHasDiskPressure, pods getting evicted across multiple namespaces.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "fcb19e71-b47b-45ba-ac2e-667673d33412",
+    "ground_truth_chunk_ids": [
+      "7c14fb0e-b1cc-40fe-83cf-da01705ae2b2"
+    ]
+  },
+  {
+    "query_id": "eval-37",
+    "service_slug": "dns-service",
+    "service_id": "9162055f-7992-4c74-abd9-2e658669add2",
+    "service_name": "DNS and Routing Service",
+    "incident_title": "BGP Route Flapping Upstream Transit Provider Packet Loss",
+    "incident_description": "Intermittent 15% packet loss on external traffic routed through primary Tier 1 ISP transit provider.",
+    "query_text": "BGP Route Flapping Upstream Transit Provider Packet Loss Intermittent 15% packet loss on external traffic routed through primary Tier 1 ISP transit provider.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "a3f96272-b8dc-4fc6-adc5-22f6200e3b2f",
+    "ground_truth_chunk_ids": [
+      "4a34af03-c8e8-41c9-aae3-6ffd38b65fd8"
+    ]
+  },
+  {
+    "query_id": "eval-38",
+    "service_slug": "redis-cache",
+    "service_id": "9e8a1fcc-6f34-4111-b32f-ee5e511576ca",
+    "service_name": "Redis Distributed Cache",
+    "incident_title": "Redis Sentinel Failover Split-Brain Configuration Desync",
+    "incident_description": "Application nodes writing to former Redis master while sentinel promoted new master during network partition.",
+    "query_text": "Redis Sentinel Failover Split-Brain Configuration Desync Application nodes writing to former Redis master while sentinel promoted new master during network partition.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "fb9c2650-5fbb-4f9c-a312-573eb1d29f83",
+    "ground_truth_chunk_ids": [
+      "84155f65-8a62-4562-b62b-1d14fa3ffac7"
+    ]
+  },
+  {
+    "query_id": "eval-39",
+    "service_slug": "rabbitmq-broker",
+    "service_id": "079aa53b-18aa-484a-a4e4-216a53b000ec",
+    "service_name": "Message Broker RabbitMQ",
+    "incident_title": "RabbitMQ Poison Pill Message Infinite Requeue Loop",
+    "incident_description": "Consumer crashing with JSONDecodeError, message requeued automatically, crashing consumer loop at 1000 iter/sec.",
+    "query_text": "RabbitMQ Poison Pill Message Infinite Requeue Loop Consumer crashing with JSONDecodeError, message requeued automatically, crashing consumer loop at 1000 iter/sec.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "429bad4a-1781-4861-bf67-3c2d798dea5f",
+    "ground_truth_chunk_ids": [
+      "6f33d808-8e2a-4cef-97bc-4fa51cecd93a"
+    ]
+  },
+  {
+    "query_id": "eval-40",
+    "service_slug": "websocket-hub",
+    "service_id": "a094b2b1-8ee6-4c40-9916-1c3e9e0f5679",
+    "service_name": "WebSocket Notification Hub",
+    "incident_title": "Asyncio Event Loop Blocking on Synchronous Requests Call",
+    "incident_description": "FastAPI WebSocket server freezing every 30 seconds for 5000ms, causing clients to drop connection.",
+    "query_text": "Asyncio Event Loop Blocking on Synchronous Requests Call FastAPI WebSocket server freezing every 30 seconds for 5000ms, causing clients to drop connection.",
+    "ground_truth_doc_type": "postmortem",
+    "ground_truth_doc_id": "b60689cd-3601-43f3-b141-cac1cfba657c",
+    "ground_truth_chunk_ids": [
+      "08fcf411-bfe5-4d53-8680-148eb3eede55"
+    ]
+  },
+  {
+    "query_id": "eval-41",
+    "service_slug": "ssl-infrastructure",
+    "service_id": "450657cb-6e98-40e1-ae5b-ed0a19e935d7",
+    "service_name": "Security & SSL Infrastructure",
+    "incident_title": "JWT Algorithm None Header Signature Bypass Attempt",
+    "incident_description": "WAF detecting malicious Authorization headers containing alg: none in JWT token header.",
+    "query_text": "JWT Algorithm None Header Signature Bypass Attempt WAF detecting malicious Authorization headers containing alg: none in JWT token header.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "d259b508-b7f9-4598-a4e5-146c75f98aca",
+    "ground_truth_chunk_ids": [
+      "2f8f2922-d590-4647-aef7-3e902b75b168"
+    ]
+  },
+  {
+    "query_id": "eval-42",
+    "service_slug": "search-engine",
+    "service_id": "c618bad9-ab68-412d-a546-e8bed841bafd",
+    "service_name": "Search & Indexing Engine",
+    "incident_title": "Elasticsearch Deep Paging OutOfMemoryError on from+size Query",
+    "incident_description": "Elasticsearch data node throwing java.lang.OutOfMemoryError when user requested page 50,000 of search results.",
+    "query_text": "Elasticsearch Deep Paging OutOfMemoryError on from+size Query Elasticsearch data node throwing java.lang.OutOfMemoryError when user requested page 50,000 of search results.",
+    "ground_truth_doc_type": "runbook",
+    "ground_truth_doc_id": "e7b87ca7-b910-41ad-bd56-865732f344c2",
+    "ground_truth_chunk_ids": [
+      "dca031d4-8643-4083-8da8-7448b19332e2"
+    ]
+  }
+]

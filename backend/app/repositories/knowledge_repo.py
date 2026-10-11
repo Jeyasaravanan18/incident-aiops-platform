@@ -1,6 +1,7 @@
 """Repository for storing, re-embedding, and retrieving knowledge chunks."""
 
 import math
+import re
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select, text
@@ -78,14 +79,18 @@ class KnowledgeRepository:
         service_id: UUID | None = None,
         top_k: int = 10,
     ) -> list[tuple[KnowledgeChunk, float]]:
-        where_clause = "search_vector @@ plainto_tsquery('english', :query)"
-        params: dict = {"query": query, "top_k": top_k}
+        words = re.findall(r"[A-Za-z0-9_-]+", query)
+        terms = [w for w in words if len(w) >= 3][:15]
+        fts_expr = " or ".join(terms) if terms else query
+
+        where_clause = "search_vector @@ websearch_to_tsquery('english', :fts_query)"
+        params: dict = {"fts_query": fts_expr, "top_k": top_k}
         if service_id is not None:
             where_clause += " AND service_id = :service_id"
             params["service_id"] = service_id
 
         sql = f"""
-            SELECT id, ts_rank_cd(search_vector, plainto_tsquery('english', :query)) AS rank
+            SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', :fts_query)) AS rank
             FROM knowledge_chunks
             WHERE {where_clause}
             ORDER BY rank DESC
