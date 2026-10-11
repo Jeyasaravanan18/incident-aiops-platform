@@ -1,48 +1,79 @@
 # Incident AIOps & SRE Reliability Platform
 
 [![CI](https://github.com/Jeyasaravanan18/incident-aiops-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Jeyasaravanan18/incident-aiops-platform/actions/workflows/ci.yml)
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
-[![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16%20(pgvector)-336791.svg)](https://www.postgresql.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![Redis](https://img.shields.io/badge/Redis-7%20(PubSub%20%2B%20ZSET)-DC382D.svg)](https://redis.io/)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16%20(Turbopack)-black.svg)](https://nextjs.org/)
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Frontend%20(Edge)-000000.svg?logo=vercel&logoColor=white)](https://incident-aiops-frontend.vercel.app)
+[![Render Deployment](https://img.shields.io/badge/Render-Backend%20(Docker)-46E3B7.svg?logo=render&logoColor=black)](https://render.com)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16%20(App%20Router)-black.svg?logo=next.js)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16%20(pgvector)-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis 7](https://img.shields.io/badge/Redis-7%20(PubSub%20%2B%20ZSET)-DC382D.svg?logo=redis&logoColor=white)](https://redis.io/)
+[![Google Gemini](https://img.shields.io/badge/AI-Gemini%202.5%20Flash-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 
-A production-grade site reliability engineering (SRE) and incident response platform featuring **PostgreSQL 16** with **pgvector**, **SQLAlchemy 2.0 async**, **Redis 7** (sliding-window rate limiting & pub/sub event fan-out), **Celery**, and a **hybrid RAG pipeline** (dense embeddings + full-text search with Reciprocal Rank Fusion) for grounded incident mitigation.
+An enterprise-grade Site Reliability Engineering (SRE) and Incident Response platform built with a modern cloud-decoupled stack: **Next.js 16 on Vercel Edge**, **FastAPI on Render**, **PostgreSQL 16 (pgvector + tsvector)**, **Redis 7** (sliding-window rate limiting & distributed WebSocket pub/sub fan-out), and a **Hybrid RAG Pipeline with Google Gemini 2.5 Flash** for grounded incident root cause analysis.
 
 ---
 
-## Architecture Diagram
+## Live Production Links & Demo Credentials
+
+| Resource | URL | Status / Notes |
+| :--- | :--- | :--- |
+| **Frontend Web Console** | [https://incident-aiops-frontend.vercel.app](https://incident-aiops-frontend.vercel.app) | Next.js 16 App Router on Vercel |
+| **Backend API (Render)** | [https://incident-aiops-backend.onrender.com](https://incident-aiops-backend.onrender.com) | FastAPI container on Render |
+| **API Health Check** | [https://incident-aiops-backend.onrender.com/health](https://incident-aiops-backend.onrender.com/health) | Returns `{"status": "ok"}` |
+| **Readiness & DB Probe** | [https://incident-aiops-backend.onrender.com/ready](https://incident-aiops-backend.onrender.com/ready) | Verifies PostgreSQL and Redis health |
+| **Interactive API Docs** | [https://incident-aiops-backend.onrender.com/docs](https://incident-aiops-backend.onrender.com/docs) | Swagger / OpenAPI Explorer |
+
+### Pre-Seeded Enterprise Demo Accounts
+
+The database comes pre-seeded with multi-role SRE test users (passwords: `ChangeMe123!`):
+
+| Role | Email Address | Password | Permissions & Scope |
+| :--- | :--- | :--- | :--- |
+| **Admin** | `admin@example.com` | `ChangeMe123!` | Full administrative access, service catalog edits, user roles |
+| **Staff SRE / Engineer** | `engineer@example.com` | `ChangeMe123!` | Incident transitions, runbook edits, root-cause postmortems |
+| **Primary On-Call** | `oncall@example.com` | `ChangeMe123!` | Alert acknowledgment, incident mitigation, live triage |
+| **Viewer** | `viewer@example.com` | `ChangeMe123!` | Read-only analytics, health telemetry, postmortem viewing |
+
+---
+
+## Production Cloud Architecture
 
 ```mermaid
 flowchart TD
-    Client[Next.js 16 Web Console / SRE Operators] -->|REST HTTP / JWT| API[FastAPI Monolith]
-    Client <-->|WebSockets| WSMgr[WebSocket Manager]
-    
-    subgraph Data Layer
-        API -->|Async Sessions / asyncpg| PG[(PostgreSQL 16 + pgvector)]
-        API -->|Atomic ZSET Rate Limit| Redis[(Redis 7)]
-        WSMgr <-->|Pub/Sub Event Fan-Out| Redis
+    subgraph VercelEdge["Vercel Global Edge Network"]
+        Client["Next.js 16 Web Console<br/>(React 19, TailwindCSS, Recharts)"]
+        WSClient["WebSocket Client<br/>(Auto Reconnect over wss://)"]
     end
 
-    subgraph Relational & Vector Storage
-        PG --> Alerts[alerts: SHA-256 Fingerprint Upsert]
-        PG --> Incidents[incidents: DAG State Machine & Partial Index]
-        PG --> Knowledge[knowledge_chunks: HNSW Vector + tsvector GIN]
-        PG --> Analytics[SQL Analytics: MTTA/MTTR FILTER & PERCENTILE_CONT]
+    subgraph RenderCloud["Render Cloud Platform"]
+        Ingress["Render TLS Termination & Load Balancer"]
+        API["FastAPI Backend Monolith<br/>(Python 3.12, Uvicorn, Docker)"]
+        WSMgr["WebSocket Manager<br/>(Distributed Broadcast)"]
+        CeleryWorker["Celery Worker Cluster<br/>(Async Tasks & Telemetry)"]
+        
+        subgraph DataLayer["Relational & Cache Tier"]
+            PG[("PostgreSQL 16 Managed DB<br/>• pgvector 768-dim HNSW<br/>• tsvector GIN Full-Text<br/>• Advisory XACT Locks<br/>• DAG State Machine")]
+            Redis[("Redis 7<br/>• ZSET Sliding Rate Limiter<br/>• Pub/Sub Event Fan-Out<br/>• Celery Task Queue")]
+        end
     end
 
-    subgraph Background Processing
-        Redis -->|Task Broker| CeleryWorker[Celery Worker Cluster]
-        CeleryBeat[Celery Beat Scheduler] -->|Periodic Crons| Redis
-        CeleryWorker -->|Async Health Probes & AI Analysis| PG
+    subgraph GoogleAI["Google Cloud AI"]
+        Gemini["Google Gemini 2.5 Flash<br/>(Structured Output + 100% Citation Grounding)"]
     end
 
-    subgraph RAG Pipeline
-        Knowledge --> Retrieval[Hybrid Retrieval: Cosine Top-K + tsvector FTS]
-        Retrieval --> RRF[Reciprocal Rank Fusion k=60]
-        RRF --> Grounding[Grounded Prompt & Citation Validator]
-        Grounding --> LLM[Gemini 1.5 Flash / Contextual Heuristic]
-    end
+    Client -->|"HTTPS REST / Bearer JWT"| Ingress
+    WSClient <-->|"wss:// Secure WebSockets"| Ingress
+    Ingress --> API
+    Ingress <--> WSMgr
+
+    API -->|"Async Sessions (asyncpg)"| PG
+    API -->|"Atomic Rate Limiting"| Redis
+    WSMgr <-->|"Pub/Sub Channels"| Redis
+    CeleryWorker -->|"Task Broker"| Redis
+    CeleryWorker -->|"Health Probes"| PG
+
+    API -->|"Hybrid RRF RAG"| Gemini
 ```
 
 ---
@@ -67,10 +98,11 @@ flowchart TD
 5. **Redis Sliding-Window Rate Limiter & Pub/Sub Fan-Out**:
    - Atomic rolling-window rate limiting on login and alert ingestion using Redis Sorted Sets (`ZSET`).
    - Distributed WebSocket broadcast cluster using Redis Pub/Sub channels to fan out live incidents across multiple backend instances.
+   - Graceful fallback to `fakeredis` in single-container or test configurations.
 6. **Hybrid RAG Pipeline with Citation Grounding**:
    - Indexes past runbooks, postmortems, and incident logs into `knowledge_chunks` with 768-dimensional embeddings and PostgreSQL `tsvector` generated columns.
-   - Fuses dense vector cosine similarity and full-text search rankings via **Reciprocal Rank Fusion (RRF)**.
-   - Validates model output against strict Pydantic schemas with automated retry loops (up to 2 retries) and programmatically verifies that 100% of generated citations exist in the retrieved knowledge set.
+   - Fuses dense vector cosine similarity and full-text search rankings via **Reciprocal Rank Fusion (RRF $k=60$)**.
+   - Validates model output against strict Pydantic schemas with automated retry loops and programmatically verifies that 100% of generated citations exist in the retrieved knowledge set.
 
 ---
 
@@ -109,75 +141,65 @@ Measured against **100,000 synthetic log rows** and **2,012 synthetic incidents*
 
 ---
 
-## Environment Variables
+## Cloud Deployment Guide
 
-Copy `.env.example` to `.env` and configure your local settings:
+### 1. Backend & Database on Render (Automated)
 
-| Variable | Description | Required | Example |
-| :--- | :--- | :---: | :--- |
-| `DATABASE_URL` | PostgreSQL async connection string | Yes | `postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops` |
-| `SYNC_DATABASE_URL` | PostgreSQL sync connection string (Alembic / Celery) | Yes | `postgresql://postgres:postgres@localhost:5432/incident_aiops` |
-| `REDIS_URL` | Redis instance connection string | Yes | `redis://localhost:6379/0` |
-| `JWT_SECRET` | Secret key for JWT signature (min 16 chars) | Yes | `development-jwt-secret-min-16-characters` |
-| `JWT_ALGORITHM` | JWT cryptographic signing algorithm | No | `HS256` |
-| `GEMINI_API_KEY` | Google Gemini API key (defaults to deterministic fake if unset) | No | `AIzaSy...` |
-| `GEMINI_MODEL` | Gemini LLM model identifier | No | `gemini-1.5-flash` |
-| `CORS_ORIGINS` | Permitted cross-origin endpoints | No | `http://localhost:3000` |
+The repository provides a pre-configured [render.yaml](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/render.yaml) Blueprint:
 
----
+1. In your **Render Dashboard**, select **New +** > **Blueprint**.
+2. Connect this repository: `https://github.com/Jeyasaravanan18/incident-aiops-platform`.
+3. Render automatically provisions:
+   - **PostgreSQL 16 Database** (`incident-aiops-db`)
+   - **Docker Web Service** (`incident-aiops-backend`) with automatic migrations & database seeding via `start.sh`.
+4. Add your optional **Gemini API Key**: `GEMINI_API_KEY=AIzaSy...`.
+5. Once deployed, copy your backend URL (`https://incident-aiops-backend.onrender.com`).
 
-## How to Run
+### 2. Frontend Web Console on Vercel
 
-### 1. Docker Compose (Full Stack)
+1. In your **Vercel Dashboard**, click **Add New...** > **Project**.
+2. Import the GitHub repository.
+3. In Project Settings:
+   - **Root Directory**: `frontend` *(⚠️ Crucial: select the `frontend` subfolder)*.
+   - **Framework Preset**: `Next.js`.
+4. Add Environment Variable:
+   - `NEXT_PUBLIC_API_BASE_URL` = `https://incident-aiops-backend.onrender.com` *(no trailing slash)*.
+5. Click **Deploy**.
+6. Set `CORS_ORIGINS` in Render to match your Vercel URL (`https://incident-aiops-frontend.vercel.app`).
+
+### 3. Local Full-Stack Run with Docker Compose
+
 ```bash
-# Clone the repository
+# 1. Clone repository
 git clone https://github.com/Jeyasaravanan18/incident-aiops-platform.git
 cd incident-aiops-platform
 
-# Set up environment variables
+# 2. Setup environment variables
 cp .env.example .env
 
-# Start PostgreSQL, Redis, Backend, Celery Worker, and Celery Beat
+# 3. Start PostgreSQL, Redis, Backend, Celery, and Frontend
 docker compose up -d
 
-# Verify system health
+# 4. Verify system health
 curl http://localhost:8000/health
 curl http://localhost:8000/ready
 ```
 
-### 2. Local Development Setup
-```bash
-# 1. Start Postgres and Redis
-docker compose up -d postgres redis
+---
 
-# 2. Set up Python virtual environment
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+## Environment Variables Reference
 
-# 3. Run database migrations
-alembic upgrade head
-
-# 4. Seed database with synthetic data (100k logs, 2k incidents)
-python -m app.scripts.seed_synthetic
-
-# 5. Run the development server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 3. Running Automated Tests & Evaluation
-```bash
-# Run code format and lint checks
-ruff check backend eval
-black --check backend eval
-
-# Run full pytest suite (67 passed, 65% coverage)
-pytest backend/tests/ -v
-
-# Run RAG evaluation harness (regenerates eval/results.md)
-make eval  # or: python backend/scripts/run_eval.py
-```
+| Variable | Description | Where It Lives | Required | Example |
+| :--- | :--- | :---: | :---: | :--- |
+| `DATABASE_URL` | PostgreSQL async connection string | Render / `.env` | Yes | `postgresql+asyncpg://user:pass@host:5432/incident_aiops` |
+| `SYNC_DATABASE_URL` | PostgreSQL sync connection string (Alembic) | Render / `.env` | Auto | `postgresql://user:pass@host:5432/incident_aiops` |
+| `REDIS_URL` | Redis instance connection string | Render / `.env` | No | `redis://localhost:6379/0` *(defaults to FakeRedis if unset)* |
+| `JWT_SECRET` | Secret key for JWT cryptographic signatures | Render / `.env` | Yes | `min-32-chars-long-secure-random-secret` |
+| `CORS_ORIGINS` | Permitted cross-origin endpoints | Render / `.env` | Yes | `https://incident-aiops-frontend.vercel.app,http://localhost:3000` |
+| `GEMINI_API_KEY` | Google Gemini API key | Render / `.env` | No | `AIzaSy...` *(falls back to deterministic heuristic if omitted)* |
+| `GEMINI_MODEL` | Gemini LLM model identifier | Render / `.env` | No | `gemini-2.5-flash` |
+| `AUTO_SEED` | Automatically seeds demo data on container boot | Render / `.env` | No | `true` |
+| `NEXT_PUBLIC_API_BASE_URL` | Backend API URL for frontend client | Vercel | Yes | `https://incident-aiops-backend.onrender.com` |
 
 ---
 
@@ -198,16 +220,10 @@ All routes are mounted under `/api/v1`:
 
 ---
 
-## Limitations & Honest Engineering Constraints
-
-- **Synthetic Data**: Benchmarking was executed on 100,000 synthetic log rows and 2,012 synthetic incidents generated with deterministic distributions. While realistic in schema and concurrency volume, real-world customer workloads may exhibit different log cardinality.
-- **Single-Node Docker Deployment**: The included `docker-compose.yml` runs a single PostgreSQL and Redis node. Multi-region high availability (Patroni, Redis Sentinel) is documented in architecture guides but not orchestrated locally.
-- **Offline AI Fallback**: When `GEMINI_API_KEY` is omitted, the platform uses a deterministic semantic hash embedding provider and contextual heuristic rule engine to ensure tests, CI, and local demos pass reliably without external network dependencies.
-
----
-
 ## Documentation Links
 
+- [architecture.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/architecture.md) — System Architecture, Cloud Topology, and Decision Matrix.
+- [docs/deployment.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/deployment.md) — Comprehensive Vercel & Render production deployment guide.
 - [docs/EVIDENCE.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/EVIDENCE.md) — Line-by-line verification audit mapping every capability to tests.
 - [docs/WALKTHROUGH.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/WALKTHROUGH.md) — Codebase architecture walkthrough and deep-dive technical FAQ.
 - [docs/performance.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/performance.md) — Raw `EXPLAIN (ANALYZE, BUFFERS)` execution plans.
