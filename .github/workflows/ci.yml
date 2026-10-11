@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: incident_aiops_test
           POSTGRES_USER: postgres
@@ -36,9 +36,18 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r backend/requirements.txt
-      - run: ruff check backend
-      - run: black --check backend
-      - run: pytest backend
+      - run: ruff check backend eval
+      - run: black --check backend eval
+      - name: Run database migrations
+        run: alembic upgrade head
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops_test
+          SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/incident_aiops_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: ci-secret-key-32-chars-long-123456
+      - name: Run test suite with coverage
+        run: pytest backend --cov=app --cov-report=term-missing
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops_test
           SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/incident_aiops_test

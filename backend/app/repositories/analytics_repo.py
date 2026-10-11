@@ -192,7 +192,7 @@ class AnalyticsRepository:
             ORDER BY days.day ASC;
             """
         )
-        rows = (await session.execute(stmt, {"days": days_count - 1})).mappings().all()
+        rows = (await session.execute(stmt, {"days": str(days_count - 1)})).mappings().all()
         return [
             {
                 "date": r["date"],

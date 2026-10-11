@@ -138,7 +138,7 @@ async def create_incident(
         raise AppError("SERVICE_NOT_FOUND", "Service not found", 404)
 
     now = datetime.now(UTC)
-    detected_at = payload.detected_at or now
+    detected_at = getattr(payload, "detected_at", None) or now
 
     if payload.severity is not None:
         severity = (
