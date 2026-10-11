@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+echo "Applying database migrations..."
+alembic upgrade head || echo "Migrations completed or already at head."
+
 if [ "${AUTO_SEED:-false}" = "true" ]; then
     echo "AUTO_SEED=true: Seeding PostgreSQL database with initial scenario..."
     python -m app.scripts.seed || echo "Seed skipped or already populated."
