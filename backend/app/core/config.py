@@ -38,15 +38,29 @@ class Settings(BaseSettings):
     def sync_database_url_resolved(self) -> str:
         url = self.sync_database_url
         if url.startswith("postgres://"):
-            return url.replace("postgres://", "postgresql://", 1)
-        if url.startswith("postgresql+asyncpg://"):
-            return url.replace("postgresql+asyncpg://", "postgresql://", 1)
-        if self.database_url:
+            url = url.replace("postgres://", "postgresql://", 1)
+        elif url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        elif not url and self.database_url:
             d_url = self.database_url
             if d_url.startswith("postgres://"):
-                return d_url.replace("postgres://", "postgresql://", 1)
-            if d_url.startswith("postgresql+asyncpg://"):
-                return d_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+                url = d_url.replace("postgres://", "postgresql://", 1)
+            elif d_url.startswith("postgresql+asyncpg://"):
+                url = d_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            else:
+                url = d_url
+
+        # If URL begins with postgresql:// and psycopg2 is missing, fall back to psycopg (v3)
+        if url.startswith("postgresql://") and not url.startswith("postgresql+"):
+            try:
+                import psycopg2  # noqa: F401
+            except ImportError:
+                try:
+                    import psycopg  # noqa: F401
+
+                    url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+                except ImportError:
+                    pass
         return url
 
     redis_url: str = "redis://localhost:6379/0"

@@ -42,17 +42,20 @@ jobs:
         run: alembic upgrade head
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops_test
-          SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/incident_aiops_test
-          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/incident_aiops_test
+          SYNC_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/incident_aiops_test
+          REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET: ci-secret-key-32-chars-long-123456
+          PYTHONPATH: .
       - name: Run test suite with coverage
-        run: pytest backend --cov=app --cov-report=term-missing
+        run: pytest tests --cov=app --cov-report=term-missing
+        working-directory: backend
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops_test
-          SYNC_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/incident_aiops_test
-          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/incident_aiops_test
+          SYNC_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/incident_aiops_test
+          REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET: ci-secret-key-32-chars-long-123456
+          PYTHONPATH: .
 
   frontend:
     runs-on: ubuntu-latest
