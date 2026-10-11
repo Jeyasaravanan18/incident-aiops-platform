@@ -209,7 +209,7 @@ All routes are mounted under `/api/v1`:
 ## Documentation Links
 
 - [docs/EVIDENCE.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/EVIDENCE.md) — Line-by-line verification audit mapping every capability to tests.
-- [docs/WALKTHROUGH.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/WALKTHROUGH.md) — Codebase architecture walkthrough and 15 interview Q&A.
+- [docs/WALKTHROUGH.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/WALKTHROUGH.md) — Codebase architecture walkthrough and deep-dive technical FAQ.
 - [docs/performance.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/performance.md) — Raw `EXPLAIN (ANALYZE, BUFFERS)` execution plans.
 - [docs/schema.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/schema.md) — Entity-relationship diagram (Mermaid) and constraint definitions.
 - [eval/results.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/eval/results.md) — RAG evaluation metrics and defect postmortems.

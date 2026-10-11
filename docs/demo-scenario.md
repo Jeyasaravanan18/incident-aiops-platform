@@ -1,6 +1,6 @@
 # Production Incident Management & AIOps Platform - Technical Demo Script
 
-This document provides a step-by-step script for demonstrating the platform to a **Senior Backend / SRE Interviewer**. It walks through the end-to-end incident lifecycle: alert ingestion, deduplication, deterministic severity escalation, real-time WebSocket event dissemination, AI/RAG context retrieval, collaborative command center triage, and blameless postmortem generation.
+This document provides a step-by-step script for demonstrating the platform to a **Senior Backend / SRE Architecture Evaluator**. It walks through the end-to-end incident lifecycle: alert ingestion, deduplication, deterministic severity escalation, real-time WebSocket event dissemination, AI/RAG context retrieval, collaborative command center triage, and blameless postmortem generation.
 
 ---
 
@@ -32,7 +32,7 @@ Verify services are healthy:
    - **Staff SRE / Engineer** (`engineer@example.com`): Incident command, status progression, runbook editing, postmortem review.
    - **On-Call Engineer** (`oncall@example.com`): Alert triage, acknowledgment, mitigation.
    - **Viewer** (`viewer@example.com`): Read-only auditor session.
-3. Login as **Admin** or **Staff SRE**. Explain to the interviewer that tokens are generated as stateless JWTs (HS256) accompanied by opaque refresh tokens with rotation and Redis revocation blacklist.
+3. Login as **Admin** or **Staff SRE**. Notice that tokens are generated as stateless JWTs (HS256) accompanied by opaque refresh tokens with rotation and Redis revocation blacklist.
 
 ### Step 2: Operations Command Center (Frontend: `/`)
 1. Inspect the live KPI ribbon:
@@ -59,7 +59,7 @@ Verify services are healthy:
        "metadata_json": {"error_rate": 35.2, "endpoint": "/v1/charges", "cluster": "us-east-1"}
      }'
    ```
-2. **Interview Talking Point - Deduplication & Concurrency**:
+2. **Key Technical Highlight - Deduplication & Concurrency**:
    - Fire the exact same request 5 times rapidly.
    - Show how the database checks the unique `fingerprint` constraint within a transactional lock.
    - Instead of spamming 5 duplicate incidents into the on-call pager, the backend increments `occurrence_count` from 1 to 5, updates `last_seen`, and correlates with the existing open incident.
@@ -102,7 +102,7 @@ Verify services are healthy:
 
 ---
 
-## 3. Summary of Technical Highlights for the Interviewer
+## 3. Architecture & Reliability Highlights Summary
 
 | Dimension | Engineering Implementation |
 |---|---|

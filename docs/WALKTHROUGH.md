@@ -1,6 +1,6 @@
-# System Architecture Walkthrough & Interview Guide
+# System Architecture & Engineering Deep-Dive
 
-This guide provides a comprehensive explanation of every module in the platform and prepares you to answer 15 targeted interview questions with technical depth drawn directly from the codebase.
+This document provides a comprehensive technical walkthrough of every module in the platform, accompanied by an architectural decisions FAQ detailing the engineering rationale and trade-offs drawn directly from the codebase.
 
 ---
 
@@ -46,18 +46,18 @@ This guide provides a comprehensive explanation of every module in the platform 
 
 ---
 
-## 2. 15 Technical Interview Questions & Answers
+## 2. Architecture & Design Decisions Deep-Dive (Technical FAQ)
 
-### Q1: Why did you eliminate MongoDB in favor of a single PostgreSQL database?
+### 1. Unified Storage: Why eliminate MongoDB in favor of a single PostgreSQL database?
 > **Answer:** The original codebase had a "split-brain" architecture where API routers queried MongoDB while Celery workers and migrations ran on PostgreSQL. This caused inconsistent data, cross-database sync failures, and Celery crashes when sessions were mismatched. Migrating to PostgreSQL 16 with SQLAlchemy 2.0 async and `asyncpg` unified all entities under ACID transactional guarantees, eliminated redundant infrastructure, enabled advisory locks for distributed synchronization, and allowed relational joins across alerts, incidents, and audit timelines.
 
-### Q2: How do you prevent duplicate incidents during an alert storm?
+### 2. Concurrency Control: How do you prevent duplicate incidents during an alert storm?
 > **Answer:** When hundreds of concurrent alerts hit the system for a degraded service, we use a PostgreSQL transaction-scoped advisory lock: `SELECT pg_advisory_xact_lock(hashtext(CAST(:service_id AS text)))`. This lock serializes incident creation per service within the database transaction without deadlocking table rows. The first transaction creates the incident; concurrent transactions immediately detect the existing open incident and attach their alerts to it.
 
-### Q3: What is the difference between an advisory lock and a row-level lock?
+### 3. Locking Strategy: What is the difference between an advisory lock and a row-level lock?
 > **Answer:** Row-level locks (`SELECT FOR UPDATE`) require a specific row to already exist in a table before locking it. When checking if an incident exists for a service, no row exists yet during the first alert, leading to race conditions where multiple transactions attempt to insert. An advisory lock (`pg_advisory_xact_lock`) locks an application-defined integer key (the 32-bit hash of the service ID) inside PostgreSQL's lock manager without touching table storage. It automatically releases when the transaction commits or rolls back.
 
-### Q4: How does alert deduplication work under high concurrency?
+### 4. Alert Ingestion: How does alert deduplication work under high concurrency?
 > **Answer:** Alerts are normalized and fingerprinted server-side using SHA-256 over `(service_id, normalized_title, severity_independent_labels)`. We execute an atomic SQL upsert:
 > ```sql
 > INSERT INTO alerts (...) VALUES (...)
@@ -67,20 +67,20 @@ This guide provides a comprehensive explanation of every module in the platform 
 > ```
 > In tests with 50 concurrent requests for the exact same alert, the database collapses them into exactly 1 row with `occurrence_count == 50`.
 
-### Q5: How do you prevent race conditions during incident status transitions?
+### 5. State Machine: How do you prevent race conditions during incident status transitions?
 > **Answer:** Before executing a state transition, the repository executes `SELECT ... FOR UPDATE` to lock the target incident row. We evaluate the state transition against our Directed Acyclic Graph (DAG) state machine. If an invalid or conflicting transition is attempted (e.g. attempting to close an incident that another responder just set to investigating), the transaction rejects the move and returns an HTTP `409 Conflict`.
 
-### Q6: Why did you implement Reciprocal Rank Fusion (RRF) instead of pure dense vector search?
+### 6. Hybrid RAG: Why implement Reciprocal Rank Fusion (RRF) instead of pure dense vector search?
 > **Answer:** Dense vector search maps text into continuous embedding space, which is great for semantic synonyms but frequently fails on exact technical tokens like error codes (`HTTP 504`, `OOMKilled 137`, `pg_terminate_backend`). Full-text search (`tsvector`) excels at exact keyword matching. Reciprocal Rank Fusion merges rankings from both channels using:
 > $$RRF(d) = \sum_{m \in \{\text{vec}, \text{fts}\}} \frac{1}{60 + \text{rank}_m(d)}$$
 > This ensures exact error codes receive an immediate rank boost while semantic context surfaces relevant runbooks even when different terminology is used.
 
-### Q7: How do you prevent LLMs from hallucinating citations in incident analyses?
+### 7. AI Grounding: How do you prevent LLMs from hallucinating citations in incident analyses?
 > **Answer:** We enforce a strict two-stage grounding check:
 > 1. In the structured prompt, the LLM is restricted to citing only chunk UUIDs present in the retrieved context block.
 > 2. Post-generation, our Python validator checks `set(output.citations).issubset(retrieved_chunk_ids)`. If an invalid citation is detected, the pipeline feeds the validation error back to the model in a retry loop (up to 2 retries). If retries fail, it falls back to the deterministic heuristic provider and marks `fallback_used=True` in the database audit log.
 
-### Q8: How does your Redis sliding-window rate limiter work?
+### 8. Rate Limiting: How does the Redis sliding-window rate limiter work?
 > **Answer:** Rather than a simple counter with boundary reset spikes, we use Redis Sorted Sets (`ZSET`). For each incoming request identified by IP or user ID:
 > 1. We remove entries older than the rolling window: `ZREMRANGEBYSCORE key 0 (now - window)`.
 > 2. We count the remaining requests: `ZCARD key`.
@@ -88,10 +88,10 @@ This guide provides a comprehensive explanation of every module in the platform 
 > 4. Otherwise, we record the request timestamp: `ZADD key now uuid`.
 > All operations run within an atomic pipeline.
 
-### Q9: How do you scale WebSockets horizontally across multiple backend servers?
+### 9. Real-Time Fan-Out: How do you scale WebSockets horizontally across multiple backend servers?
 > **Answer:** If multiple FastAPI instances run behind a load balancer, client WebSockets are distributed across servers. When an alert or incident event is generated on Server A, Server A publishes the event payload to a Redis channel (`incident_events`). All server instances subscribe to this channel via an async worker loop; upon receiving the message, each server broadcasts it to its locally connected WebSocket clients.
 
-### Q10: How are MTTA and MTTR calculated in SQL rather than application loops?
+### 10. SQL Analytics: How are MTTA and MTTR calculated in SQL rather than application loops?
 > **Answer:** Instead of pulling thousands of rows into Python memory, we execute database-level aggregations:
 > ```sql
 > SELECT
@@ -110,7 +110,7 @@ This guide provides a comprehensive explanation of every module in the platform 
 ### Q12: Why did you use a GIN index on `tsvector` instead of `LIKE '%keyword%'`?
 > **Answer:** A `LIKE '%keyword%'` query forces a sequential scan across all rows because leading wildcards cannot use B-tree indexes. On our 100,000-row synthetic benchmark, unindexed scans took **173.03 ms**. A Generalized Inverted Index (GIN) on a `tsvector` column breaks text into lexemes and maps each lexeme directly to row pointers, reducing query execution time to **36.60 ms** (a **4.73x speedup**).
 
-### Q13: What is a partial index and where is it used?
+### 13. Query Optimization: What is a partial index and where is it used?
 > **Answer:** A partial index only indexes rows matching a `WHERE` predicate. On the `incidents` table, 95% of rows are historically resolved or closed. We created:
 > ```sql
 > CREATE INDEX ix_incidents_open_per_service
@@ -119,10 +119,10 @@ This guide provides a comprehensive explanation of every module in the platform 
 > ```
 > This keeps the index small in memory, speeds up live dashboard queries, and avoids scanning historical data.
 
-### Q14: How do Celery worker tasks execute async SQLAlchemy queries safely?
+### 14. Background Workers: How do Celery tasks execute async SQLAlchemy queries safely?
 > **Answer:** Celery worker threads run synchronously. Creating or sharing an async event loop or session across worker calls causes deadlocks and connection leaks. We wrap each async task body in an isolated `asyncio.run(_async_task_body())` with a clean `async with SessionLocal() as session:` block. This guarantees a dedicated event loop and connection checkout per task invocation.
 
-### Q15: How do you guarantee secrets never leak into logs or source control?
+### 15. Security & Compliance: How do you guarantee secrets never leak into logs or source control?
 > **Answer:** We enforce a defense-in-depth approach:
 > 1. Hardcoded secrets were purged, and `.env` is ignored by Git. `.env.example` contains only sanitized placeholders.
 > 2. Missing critical variables (`DATABASE_URL`, `JWT_SECRET`) cause the application to fail fast on startup with clear error messages.

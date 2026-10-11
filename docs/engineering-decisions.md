@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs) & Engineering Trade-Offs
 
-This document captures the architectural decisions, trade-offs, and technical rationale underpinning the **Production Incident Management & AIOps Platform**. It is specifically structured to equip engineering candidates to defend every design choice during technical interviews.
+This document captures the architectural decisions, trade-offs, and technical rationale underpinning the **Production Incident Management & AIOps Platform**. It is structured to defend every design choice, trade-off, and operational invariant implemented in the codebase.
 
 ---
 
