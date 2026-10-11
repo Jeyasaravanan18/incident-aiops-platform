@@ -24,6 +24,10 @@ services:
         fromDatabase:
           name: incident-aiops-db
           property: connectionString
+      - key: SYNC_DATABASE_URL
+        fromDatabase:
+          name: incident-aiops-db
+          property: connectionString
       - key: AUTO_SEED
         value: "true"
       - key: LLM_PROVIDER

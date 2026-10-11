@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops"
-    sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/incident_aiops"
+    sync_database_url: str | None = None
 
     @model_validator(mode="after")
     def validate_required_configuration(self) -> "Settings":
@@ -36,19 +36,11 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url_resolved(self) -> str:
-        url = self.sync_database_url
+        url = self.sync_database_url or self.database_url
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
         elif url.startswith("postgresql+asyncpg://"):
             url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
-        elif not url and self.database_url:
-            d_url = self.database_url
-            if d_url.startswith("postgres://"):
-                url = d_url.replace("postgres://", "postgresql://", 1)
-            elif d_url.startswith("postgresql+asyncpg://"):
-                url = d_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-            else:
-                url = d_url
 
         # If URL begins with postgresql:// and psycopg2 is missing, fall back to psycopg (v3)
         if url.startswith("postgresql://") and not url.startswith("postgresql+"):
