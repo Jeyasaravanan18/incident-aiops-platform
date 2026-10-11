@@ -48,7 +48,14 @@ jobs:
           JWT_SECRET: ci-secret-key-32-chars-long-123456
           PYTHONPATH: .
       - name: Run test suite with coverage
-        run: pytest tests --cov=app --cov-report=term-missing
+        run: |
+          pytest tests -v --tb=short --cov=app --cov-report=term-missing 2>&1 | tee test_output.log || {
+            echo "## Pytest Failure Log" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 test_output.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
         working-directory: backend
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/incident_aiops_test
