@@ -1,7 +1,6 @@
 databases:
   - name: incident-aiops-db
     databaseName: incident_aiops
-    user: postgres
     plan: free
     region: oregon
 
