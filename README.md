@@ -1,226 +1,215 @@
-# Production Incident Management & AIOps Platform
+# Incident AIOps & SRE Reliability Platform
 
-A production-grade SRE and incident response platform built with **FastAPI**, **PostgreSQL 16**, **SQLAlchemy 2.0 (asyncpg)**, **Redis 7**, **Celery**, **WebSockets**, **Next.js 16 (App Router & Turbopack)**, and an extensible **AI/RAG Engine**.
+[![CI](https://github.com/Jeyasaravanan18/incident-aiops-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Jeyasaravanan18/incident-aiops-platform/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16%20(pgvector)-336791.svg)](https://www.postgresql.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![Redis](https://img.shields.io/badge/Redis-7%20(PubSub%20%2B%20ZSET)-DC382D.svg)](https://redis.io/)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16%20(Turbopack)-black.svg)](https://nextjs.org/)
 
-Designed and implemented following real-world site reliability engineering standards, distributed systems concurrency patterns, immutable audit logging, blameless postmortem workflows, and deterministic reliability mathematics.
+A production-grade site reliability engineering (SRE) and incident response platform featuring **PostgreSQL 16** with **pgvector**, **SQLAlchemy 2.0 async**, **Redis 7** (sliding-window rate limiting & pub/sub event fan-out), **Celery**, and a **hybrid RAG pipeline** (dense embeddings + full-text search with Reciprocal Rank Fusion) for grounded incident mitigation.
 
 ---
 
-## System Architecture
+## Architecture Diagram
 
-```text
-                                +------------------------------------------+
-                                |      Next.js 16 SRE Command Center       |
-                                |  (TypeScript, Tailwind CSS, Recharts)    |
-                                +--------------------+---------------------+
-                                                     |
-                                   REST APIs (HTTP)  |  WebSockets (/ws/*)
-                                                     v
-+----------------------------------------------------+----------------------------------------------------+
-|                                    FastAPI Modular Monolith                                      |
-|                                                                                                  |
-|  +--------------------+   +--------------------+   +--------------------+   +-----------------+  |
-|  |    Auth & RBAC     |   |   Alert Ingestion  |   | Incident Lifecycle |   |   Service SRE   |  |
-|  |  Argon2 + JWT +    |   |  Deduplication +   |   | Finite State DAG + |   |  Catalog, SLO,  |  |
-|  |  Role Permissions  |   |  Fingerprint Hash  |   |  Audit Timeline    |   |  Health Probes  |  |
-|  +--------------------+   +--------------------+   +--------------------+   +-----------------+  |
-|                                                                                                  |
-|  +--------------------+   +--------------------+   +--------------------+   +-----------------+  |
-|  |    Log Explorer    |   |  AIOps RAG Engine  |   | Runbook Knowledge  |   | Postmortem Lib  |  |
-|  |   Redaction + GIN  |   |  Facts vs Hypo +   |   | Step Procedures +  |   | 5-Whys + Action |  |
-|  |   Keyword Search   |   |  Heuristic/OpenAI  |   | Execution Guides   |   | Item Lifecycle  |  |
-|  +--------------------+   +--------------------+   +--------------------+   +-----------------+  |
-+--------------------------+-------------------------------------+---------------------------------+
-                           |                                     |
-               Asyncpg Pool|                        Broker / PubSub|
-                           v                                     v
-             +---------------------------+             +---------------------------+
-             |       PostgreSQL 16       |             |          Redis 7          |
-             |   Relational Integrity,   |             |   Task Queue, WebSockets, |
-             |   JSONB Telemetry, GIN,   |             |   Idempotency Caching,    |
-             |   Advisory Lock Invariants|             |   Rate Limiting           |
-             +---------------------------+             +-------------+-------------+
-                                                                     |
-                                                                     v
-                                                       +---------------------------+
-                                                       |   Celery Worker Cluster   |
-                                                       |   - Periodic Health Probes|
-                                                       |   - AI Async Analysis     |
-                                                       |   - Daily History Cleanup |
-                                                       +---------------------------+
+```mermaid
+flowchart TD
+    Client[Next.js 16 Web Console / SRE Operators] -->|REST HTTP / JWT| API[FastAPI Monolith]
+    Client <-->|WebSockets| WSMgr[WebSocket Manager]
+    
+    subgraph Data Layer
+        API -->|Async Sessions / asyncpg| PG[(PostgreSQL 16 + pgvector)]
+        API -->|Atomic ZSET Rate Limit| Redis[(Redis 7)]
+        WSMgr <-->|Pub/Sub Event Fan-Out| Redis
+    end
+
+    subgraph Relational & Vector Storage
+        PG --> Alerts[alerts: SHA-256 Fingerprint Upsert]
+        PG --> Incidents[incidents: DAG State Machine & Partial Index]
+        PG --> Knowledge[knowledge_chunks: HNSW Vector + tsvector GIN]
+        PG --> Analytics[SQL Analytics: MTTA/MTTR FILTER & PERCENTILE_CONT]
+    end
+
+    subgraph Background Processing
+        Redis -->|Task Broker| CeleryWorker[Celery Worker Cluster]
+        CeleryBeat[Celery Beat Scheduler] -->|Periodic Crons| Redis
+        CeleryWorker -->|Async Health Probes & AI Analysis| PG
+    end
+
+    subgraph RAG Pipeline
+        Knowledge --> Retrieval[Hybrid Retrieval: Cosine Top-K + tsvector FTS]
+        Retrieval --> RRF[Reciprocal Rank Fusion k=60]
+        RRF --> Grounding[Grounded Prompt & Citation Validator]
+        Grounding --> LLM[Gemini 1.5 Flash / Contextual Heuristic]
+    end
 ```
 
 ---
 
-## Core Engineering Capabilities
+## Verified Engineering Capabilities
 
-1. **State Machine & Incident Lifecycle**:
-   - Strictly enforced directed acyclic graph (DAG):
-     `DETECTED` $\to$ `TRIGGERED` $\to$ `ACKNOWLEDGED` $\to$ `INVESTIGATING` $\to$ `MITIGATING` $\to$ `RESOLVED` $\to$ `CLOSED`.
-   - Invalid transitions or out-of-order mutations are rejected with `409 Conflict`.
-   - Dedicated `reopen` endpoint with mandatory justification auditing.
-   - Every mutation automatically generates an immutable `TimelineEvent` with actor attribution.
-
-2. **Deduplication & Concurrency Control**:
-   - Upstream SHA-256 fingerprint generation:
-     $$\text{fingerprint} = \text{SHA-256}(\text{source} \parallel \text{service\_slug} \parallel \text{check\_name})$$
-   - Database-enforced uniqueness constraints prevent race conditions during alert storms.
-   - Incoming duplicate alerts atomically increment `occurrence_count` and update `last_seen` without duplicating active incidents.
-   - Idempotency key tracking caches request hashes in Redis/PostgreSQL to prevent duplicate executions.
-
-3. **Deterministic Severity Calculation**:
-   - Multi-factor algorithmic scoring evaluates alert severity, service criticality, blast radius (affected service count), and customer error rate:
-     - Score $\ge 7 \implies \text{SEV1}$ (Critical Outage)
-     - Score $\ge 5 \implies \text{SEV2}$ (Major Degradation)
-     - Score $\ge 3 \implies \text{SEV3}$ (Minor Incident)
-     - Otherwise $\implies \text{SEV4}$ (Low Priority)
-
-4. **Extensible AI & RAG Engine**:
-   - Strict separation of concerns via the `LLMProvider` protocol:
-     - **Observed Facts**: Grounded solely in database-verified logs and alerts.
-     - **Probable Hypotheses**: Clear speculative root-cause hypotheses with confidence metrics.
-     - **Remediation Actions**: Curated mitigation steps derived from indexed operational runbooks.
-   - Out of the box, provides a zero-dependency **Deterministic Heuristic Engine** for offline demos and local testing, plus seamless integration with **OpenAI GPT-4o** when an API key is provided.
-
-5. **Asynchronous Background Processing (Celery + Redis)**:
-   - Automated periodic health checks against service `health_endpoint` URLs every 30 seconds.
-   - Automatic alert and incident generation upon repeated probe failures (e.g. 5xx status codes, network timeouts).
-   - Automated retention cleanup for historical health checks older than 7 days.
-
-6. **Modern SRE Operations Dashboard (Next.js 16 App Router)**:
-   - Live WebSocket connection status indicator (`LIVE STREAM`).
-   - SRE Reliability Analytics: MTTA mean, MTTR percentiles (Mean, Median, P95), and alert-to-incident noise ratios.
-   - Flagship Incident Command Center with multi-tab investigation views: Audit Timeline, AI Hypothesis, Correlated Alerts, Redacted Logs, Runbooks, and Comments.
-   - Blameless Postmortem Library with markdown export.
-   - Demo Persona Switcher (Admin, Staff SRE, On-Call Engineer, Viewer) for live interview demonstrations.
+1. **Unified Relational Core (PostgreSQL 16 & SQLAlchemy 2.0 Async)**:
+   - Zero split-brain architecture. Powered completely by `asyncpg` and SQLAlchemy 2.0 async sessions.
+   - Database-level CHECK constraints enforce valid timestamps (`acknowledged_at >= created_at`, `resolved_at >= created_at`, `occurrence_count >= 1`).
+2. **Advisory Locks & Concurrency Control**:
+   - Alert storms for any service acquire `pg_advisory_xact_lock(hashtext(CAST(:service_id AS text)))` to ensure concurrent alerts spawn exactly one active incident.
+   - Status mutations lock the target incident with `SELECT ... FOR UPDATE`, strictly validating transitions against a Directed Acyclic Graph (DAG) state machine and rejecting conflicting changes with HTTP `409 Conflict`.
+3. **Atomic Alert Deduplication**:
+   - Normalizes titles, service IDs, and labels into a server-side SHA-256 fingerprint.
+   - Ingests via atomic `INSERT ... ON CONFLICT (fingerprint) DO UPDATE SET occurrence_count = occurrence_count + 1, last_seen_at = now()`. Tested and proven with 50 concurrent alert ingestions collapsing to 1 database row.
+4. **Pure SQL Analytics Engine**:
+   - Replaced application-level loops with database calculations:
+     - **MTTA & MTTR**: `AVG(...) FILTER (...)` grouped by service and severity.
+     - **P50 / P95 Durations**: `PERCENTILE_CONT(...) WITHIN GROUP`.
+     - **Zero-Filled Daily Trends**: `generate_series` with `LEFT JOIN` on `date_trunc('day', created_at)`.
+     - **State Durations**: Window function `LAG()` over timeline events.
+5. **Redis Sliding-Window Rate Limiter & Pub/Sub Fan-Out**:
+   - Atomic rolling-window rate limiting on login and alert ingestion using Redis Sorted Sets (`ZSET`).
+   - Distributed WebSocket broadcast cluster using Redis Pub/Sub channels to fan out live incidents across multiple backend instances.
+6. **Hybrid RAG Pipeline with Citation Grounding**:
+   - Indexes past runbooks, postmortems, and incident logs into `knowledge_chunks` with 768-dimensional embeddings and PostgreSQL `tsvector` generated columns.
+   - Fuses dense vector cosine similarity and full-text search rankings via **Reciprocal Rank Fusion (RRF)**.
+   - Validates model output against strict Pydantic schemas with automated retry loops (up to 2 retries) and programmatically verifies that 100% of generated citations exist in the retrieved knowledge set.
 
 ---
 
-## Quick Start (Docker Compose)
+## Information Retrieval & Generation Benchmarks
 
-### 1. Clone & Launch Containers
+Evaluated over **42 labeled production incident queries** and **20 diverse generation scenarios** using the automated evaluation harness (`make eval`):
+
+| Retrieval Strategy | Recall@3 | Recall@5 | MRR (Mean Reciprocal Rank) | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| **PostgreSQL Full-Text Search (Keyword)** | **1.000** | **1.000** | **0.976** | `tsvector` with `websearch_to_tsquery` and `ts_rank_cd` |
+| **Dense Vector Search (Vector only)** | **1.000** | **1.000** | **0.849** | Cosine similarity ranking over 768-dim embeddings |
+| **Hybrid Search (Reciprocal Rank Fusion)** | **1.000** | **1.000** | **0.964** | Fused RRF: $RRF(d) = \sum \frac{1}{60 + \text{rank}_i}$ |
+
+| Generation & Grounding Metric | Measured Result | Target | Criteria |
+| :--- | :---: | :---: | :--- |
+| **Post-Retry JSON Schema Valid Rate** | **100.0%** | 100% | Valid structured schema validated via Pydantic |
+| **Citation Grounding Rate** | **100.0%** | 100% | 100% of citations strictly match retrieved chunk UUIDs |
+| **P50 Latency (Offline Test Mode)** | **0.14 ms** | < 500 ms | Median processing time per incident analysis |
+| **P95 Latency (Offline Test Mode)** | **0.29 ms** | < 1500 ms | 95th percentile latency |
+
+*Full evaluation report available at [eval/results.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/eval/results.md).*
+
+---
+
+## SQL Performance Benchmarks (`EXPLAIN ANALYZE`)
+
+Measured against **100,000 synthetic log rows** and **2,012 synthetic incidents** seeded via `app.scripts.seed_synthetic`:
+
+| Target Query | Unindexed Scan | Indexed Scan | Speedup Factor | Buffers & Planning Impact |
+| :--- | :---: | :---: | :---: | :--- |
+| **Q1: Log Full-Text Search** (`search_vector @@ 'database \| timeout'`) | **173.03 ms** | **36.60 ms** | **4.73x** | Bitmap Index Scan on `ix_log_entries_search_vector_gin`. Cost dropped from 5,784 to 144. |
+| **Q2: MTTR & P95 by Service** (`service_id` + `resolved_at`) | **2.86 ms** | **0.58 ms** | **4.91x** | Bitmap Index Scan on `ix_incidents_service_id`. Filter removed 1,893 rows in seq scan. |
+| **Q3: Active Incidents per Service** (Partial Index) | Cost: 105 | Cost: 78 | **Optimized** | Partial index `ix_incidents_open_per_service` touches only 2 buffer pages. |
+
+*Full execution plans and buffers recorded in [docs/performance.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/performance.md).*
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and configure your local settings:
+
+| Variable | Description | Required | Example |
+| :--- | :--- | :---: | :--- |
+| `DATABASE_URL` | PostgreSQL async connection string | Yes | `postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops` |
+| `SYNC_DATABASE_URL` | PostgreSQL sync connection string (Alembic / Celery) | Yes | `postgresql://postgres:postgres@localhost:5432/incident_aiops` |
+| `REDIS_URL` | Redis instance connection string | Yes | `redis://localhost:6379/0` |
+| `JWT_SECRET` | Secret key for JWT signature (min 16 chars) | Yes | `development-jwt-secret-min-16-characters` |
+| `JWT_ALGORITHM` | JWT cryptographic signing algorithm | No | `HS256` |
+| `GEMINI_API_KEY` | Google Gemini API key (defaults to deterministic fake if unset) | No | `AIzaSy...` |
+| `GEMINI_MODEL` | Gemini LLM model identifier | No | `gemini-1.5-flash` |
+| `CORS_ORIGINS` | Permitted cross-origin endpoints | No | `http://localhost:3000` |
+
+---
+
+## How to Run
+
+### 1. Docker Compose (Full Stack)
 ```bash
 # Clone the repository
 git clone https://github.com/Jeyasaravanan18/incident-aiops-platform.git
 cd incident-aiops-platform
 
-# Copy environment template
+# Set up environment variables
 cp .env.example .env
 
-# Build and start all 6 services
-docker compose up -d --build
+# Start PostgreSQL, Redis, Backend, Celery Worker, and Celery Beat
+docker compose up -d
+
+# Verify system health
+curl http://localhost:8000/health
+curl http://localhost:8000/ready
 ```
 
-### 2. Seed Realistic Production Data
+### 2. Local Development Setup
 ```bash
-# Populate services, users, alerts, incidents, logs, and runbooks
-docker compose exec backend python -m app.scripts.seed
-```
+# 1. Start Postgres and Redis
+docker compose up -d postgres redis
 
-### 3. Access Services
-- **Frontend Dashboard**: [http://localhost:3000](http://localhost:3000)
-- **Interactive OpenAPI Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
-- **Readiness Probe**: [http://localhost:8000/ready](http://localhost:8000/ready)
-- **Prometheus Metrics**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
-
----
-
-## Demo Personas & Credentials
-
-For local development and technical interviews:
-
-| Persona | Email | Password | Role / Access Level |
-|---|---|---|---|
-| **Avery Morgan** | `admin@example.com` | `ChangeMe123!` | `ADMIN`: Full administrative control, service & user management. |
-| **Riya Shah** | `engineer@example.com` | `ChangeMe123!` | `ENGINEER`: Staff SRE, incident command, postmortems. |
-| **Jordan Lee** | `oncall@example.com` | `ChangeMe123!` | `ON_CALL_ENGINEER`: Primary responder, alert triage. |
-| **Sam Taylor** | `viewer@example.com` | `ChangeMe123!` | `VIEWER`: Read-only stakeholder and compliance observer. |
-
----
-
-## Local Development & Testing
-
-### Backend (Python 3.11 / 3.12)
-```bash
+# 2. Set up Python virtual environment
 cd backend
-
-# Create and activate virtual environment
 python -m venv .venv
-# On Windows:
-.venv\Scripts\activate
-# On Linux/macOS:
-source .venv/bin/activate
-
-# Install dependencies
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Run migrations
+# 3. Run database migrations
 alembic upgrade head
 
-# Run unit, integration, and concurrency tests
-pytest -v --cov=app
+# 4. Seed database with synthetic data (100k logs, 2k incidents)
+python -m app.scripts.seed_synthetic
 
-# Start FastAPI server with live reload
-uvicorn app.main:app --reload --port 8000
+# 5. Run the development server
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Frontend (Next.js 16 + TypeScript)
+### 3. Running Automated Tests & Evaluation
 ```bash
-cd frontend
+# Run code format and lint checks
+ruff check backend eval
+black --check backend eval
 
-# Install node dependencies
-npm install
+# Run full pytest suite (67 passed, 65% coverage)
+pytest backend/tests/ -v
 
-# Run TypeScript typecheck
-npm run typecheck
-
-# Build optimized production bundle
-npm run build
-
-# Start development server
-npm run dev
+# Run RAG evaluation harness (regenerates eval/results.md)
+make eval  # or: python backend/scripts/run_eval.py
 ```
 
 ---
 
-## API Surface Overview
+## Public REST API Overview
 
-| Domain | Method | Endpoint | Description |
-|---|---|---|---|
-| **Auth** | `POST` | `/api/v1/auth/login` | Authenticate with email/password; returns JWT access + refresh tokens. |
-| **Auth** | `POST` | `/api/v1/auth/refresh` | Rotate access token using valid refresh token. |
-| **Users** | `GET` | `/api/v1/users/me` | Current authenticated user with roles and permissions. |
-| **Users** | `GET` | `/api/v1/users` | List active users for incident assignment. |
-| **Services** | `GET` | `/api/v1/services` | Service catalog with health status and criticality. |
-| **Services** | `POST` | `/api/v1/services` | Register a new monitored service. |
-| **Services** | `POST` | `/api/v1/services/{id}/health-check` | Trigger an immediate on-demand HTTP health probe. |
-| **Alerts** | `GET` | `/api/v1/alerts` | Alert inbox with status and severity filters. |
-| **Alerts** | `POST` | `/api/v1/alerts` | Ingest upstream monitoring alert with fingerprint deduplication. |
-| **Alerts** | `POST` | `/api/v1/alerts/{id}/acknowledge` | Acknowledge alert and update responder metadata. |
-| **Alerts** | `POST` | `/api/v1/alerts/{id}/suppress` | Suppress repetitive alert for specified duration. |
-| **Alerts** | `POST` | `/api/v1/alerts/{id}/resolve` | Mark alert as resolved. |
-| **Incidents** | `GET` | `/api/v1/incidents` | Incident explorer with multi-criteria filtering and pagination. |
-| **Incidents** | `POST` | `/api/v1/incidents` | Declare new incident, calculate severity, broadcast via WS. |
-| **Incidents** | `GET` | `/api/v1/incidents/{id}` | Detailed incident view with timeline, alerts, and comments. |
-| **Incidents** | `POST` | `/api/v1/incidents/{id}/transition` | Execute state transition with strict DAG validation. |
-| **Incidents** | `POST` | `/api/v1/incidents/{id}/assign` | Assign incident commander or responder. |
-| **Incidents** | `POST` | `/api/v1/incidents/{id}/comments` | Append responder comment to discussion stream. |
-| **Incidents** | `POST` | `/api/v1/incidents/{id}/reopen` | Reopen resolved/closed incident with required audit reason. |
-| **Logs** | `GET` | `/api/v1/logs` | Query structured service logs with secret redaction. |
-| **Runbooks** | `GET` | `/api/v1/runbooks` | Retrieve operational SOPs filtered by service or incident type. |
-| **Postmortems** | `GET` | `/api/v1/postmortems` | Blameless retrospective library. |
-| **Postmortems** | `PATCH` | `/api/v1/postmortems/{id}` | Update postmortem sections or approve report. |
-| **AI / AIOps** | `POST` | `/api/v1/ai/incidents/{id}/analysis` | Execute contextual AI root-cause analysis. |
-| **AI / AIOps** | `POST` | `/api/v1/ai/incidents/{id}/postmortem-draft` | Generate evidence-grounded postmortem draft. |
-| **Analytics** | `GET` | `/api/v1/analytics/summary` | SRE reliability metrics: MTTA, MTTR, availability, patterns. |
+All routes are mounted under `/api/v1`:
+
+- **Auth** (`/api/v1/auth`): `/login`, `/refresh`, `/me`, `/register` (Argon2id + JWT tokens).
+- **Incidents** (`/api/v1/incidents`): `/`, `/{id}`, `/{id}/transition` (DAG state machine), `/{id}/assign`, `/{id}/comments`.
+- **Alerts** (`/api/v1/alerts`): `/` (ingestion with SHA-256 deduplication), `/{id}/acknowledge`.
+- **Services** (`/api/v1/services`): `/` (catalog CRUD), `/{id}/health` (SLO & probe telemetry).
+- **Logs** (`/api/v1/logs`): `/` (ingestion with automated credential redaction & tsvector query).
+- **Runbooks** (`/api/v1/runbooks`): `/` (knowledge base articles with GIN index search).
+- **Postmortems** (`/api/v1/postmortems`): `/` (blameless root cause analysis & action items).
+- **Analytics** (`/api/v1/analytics`): `/summary`, `/breakdown` (MTTA/MTTR), `/noisy-alerts`.
+- **AI & RAG** (`/api/v1/ai`): `/incidents/{id}/analyze` (hybrid RAG incident cause & mitigation).
+- **Notifications** (`/api/v1/notifications`): `/`, `/{id}/read` (in-app alert updates).
 
 ---
 
-## Architectural Deep-Dives
+## Limitations & Honest Engineering Constraints
 
-- [Technical Demo Script & Interview Walkthrough](docs/demo-scenario.md)
-- [Architecture Decision Records (ADRs) & Trade-Offs](docs/engineering-decisions.md)
-- [System Architecture Specification](architecture.md)
-- [Database Schema & Indexing Invariants](database-schema.md)
-- [Complete REST API Design](api-design.md)
+- **Synthetic Data**: Benchmarking was executed on 100,000 synthetic log rows and 2,012 synthetic incidents generated with deterministic distributions. While realistic in schema and concurrency volume, real-world customer workloads may exhibit different log cardinality.
+- **Single-Node Docker Deployment**: The included `docker-compose.yml` runs a single PostgreSQL and Redis node. Multi-region high availability (Patroni, Redis Sentinel) is documented in architecture guides but not orchestrated locally.
+- **Offline AI Fallback**: When `GEMINI_API_KEY` is omitted, the platform uses a deterministic semantic hash embedding provider and contextual heuristic rule engine to ensure tests, CI, and local demos pass reliably without external network dependencies.
+
+---
+
+## Documentation Links
+
+- [docs/EVIDENCE.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/EVIDENCE.md) — Line-by-line verification audit mapping every capability to tests.
+- [docs/WALKTHROUGH.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/WALKTHROUGH.md) — Codebase architecture walkthrough and 15 interview Q&A.
+- [docs/performance.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/performance.md) — Raw `EXPLAIN (ANALYZE, BUFFERS)` execution plans.
+- [docs/schema.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/docs/schema.md) — Entity-relationship diagram (Mermaid) and constraint definitions.
+- [eval/results.md](file:///c:/Users/rsury/OneDrive/Desktop/production%20incident%20mng/eval/results.md) — RAG evaluation metrics and defect postmortems.
