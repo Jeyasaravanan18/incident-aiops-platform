@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import UserAuth, idempotency_key, require_permission
 from app.core.database import get_session
 from app.core.errors import AppError
+from app.domain.alerts import compute_alert_fingerprint
 from app.domain.idempotency import (
     get_idempotent_response,
     payload_hash,
@@ -128,8 +129,15 @@ async def ingest_alert(
 
     now = datetime.now(UTC)
 
-    # 1. Deduplication check
-    existing = await AlertRepository.get_by_fingerprint(session, payload.fingerprint)
+    # 1. Server-side deterministic fingerprinting
+    fingerprint = compute_alert_fingerprint(
+        service_id=payload.service_id,
+        title=payload.title,
+        metadata_json=payload.metadata,
+    )
+
+    # Deduplication check
+    existing = await AlertRepository.get_by_fingerprint(session, fingerprint)
     if existing:
         new_status = (
             AlertStatus.OPEN
@@ -171,10 +179,12 @@ async def ingest_alert(
         severity=alert_severity,
         title=payload.title,
         description=payload.description,
-        fingerprint=payload.fingerprint,
+        fingerprint=fingerprint,
         metadata_json={**payload.metadata, "idempotency_key": key},
         first_seen=now,
         last_seen=now,
+        first_seen_at=now,
+        last_seen_at=now,
         occurrence_count=1,
         status=AlertStatus.OPEN,
     )
@@ -204,7 +214,7 @@ async def ingest_alert(
             event_type="AlertCorrelated",
             message=f"Correlated alert: '{payload.title}' ({alert_severity.value})",
             actor_id=None,
-            metadata_json={"alert_id": str(alert.id), "fingerprint": payload.fingerprint},
+            metadata_json={"alert_id": str(alert.id), "fingerprint": fingerprint},
         )
 
     await store_idempotent_response(

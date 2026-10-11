@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Computed, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -19,6 +19,8 @@ class LogEntry(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_logs_service_timestamp", "service_id", "timestamp"),
         Index("ix_logs_level_timestamp", "level", "timestamp"),
+        Index("ix_log_entries_metadata_json_gin", "metadata_json", postgresql_using="gin"),
+        Index("ix_log_entries_search_vector_gin", "search_vector", postgresql_using="gin"),
     )
 
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -29,3 +31,8 @@ class LogEntry(UUIDMixin, TimestampMixin, Base):
     trace_id: Mapped[str | None] = mapped_column(String(120))
     request_id: Mapped[str | None] = mapped_column(String(120))
     metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', coalesce(message, ''))", persisted=True),
+        nullable=True,
+    )

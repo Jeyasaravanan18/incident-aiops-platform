@@ -12,7 +12,7 @@ class AlertCreate(BaseModel):
     severity: AlertSeverity
     title: str = Field(max_length=300)
     description: str | None = None
-    fingerprint: str = Field(max_length=300)
+    fingerprint: str | None = Field(default=None, max_length=300)
     metadata: dict = Field(default_factory=dict)
 
 

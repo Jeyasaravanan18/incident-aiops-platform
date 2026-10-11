@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +24,21 @@ class Incident(UUIDMixin, TimestampMixin, Base):
         Index("ix_incidents_severity", "severity"),
         Index("ix_incidents_service_id", "service_id"),
         Index("ix_incidents_created_at", "created_at"),
+        Index(
+            "ix_incidents_open_per_service",
+            "service_id",
+            postgresql_where=text(
+                "status IN ('DETECTED', 'TRIGGERED', 'ACKNOWLEDGED', 'INVESTIGATING', 'MITIGATING')"
+            ),
+        ),
+        CheckConstraint(
+            "acknowledged_at IS NULL OR acknowledged_at >= created_at",
+            name="ck_incidents_ack_after_created",
+        ),
+        CheckConstraint(
+            "resolved_at IS NULL OR resolved_at >= created_at",
+            name="ck_incidents_res_after_created",
+        ),
     )
 
     service_id: Mapped[UUID] = mapped_column(ForeignKey("services.id", ondelete="CASCADE"))

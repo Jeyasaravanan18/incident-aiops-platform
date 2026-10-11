@@ -62,13 +62,16 @@ class AlertRepository:
         now = datetime.now(UTC)
         alert.occurrence_count += 1
         alert.last_seen = now
+        alert.last_seen_at = now
         alert.status = new_status
         await session.flush()
         return alert
 
     @staticmethod
     async def update_status(session: AsyncSession, alert: Alert, status: AlertStatus) -> Alert:
+        now = datetime.now(UTC)
         alert.status = status
-        alert.last_seen = datetime.now(UTC)
+        alert.last_seen = now
+        alert.last_seen_at = now
         await session.flush()
         return alert
