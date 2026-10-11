@@ -1,15 +1,12 @@
-import math
-from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
-from app.models.alert import Alert
-from app.models.incident import Incident
-from app.models.service import Service, ServiceHealthCheck
+from app.repositories.analytics_repo import AnalyticsRepository
 from app.schemas.analytics import (
     AnalyticsSummaryResponse,
     IncidentTrendPoint,
@@ -25,15 +22,16 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 def calculate_percentile(sorted_values: list[float], percentile: float) -> float:
+    """Helper for calculating statistical percentiles."""
     if not sorted_values:
         return 0.0
     k = (len(sorted_values) - 1) * percentile
-    f = math.floor(k)
-    c = math.ceil(k)
+    f = int(k)
+    c = min(f + 1, len(sorted_values) - 1)
     if f == c:
-        return round(sorted_values[int(k)], 1)
-    d0 = sorted_values[int(f)] * (c - k)
-    d1 = sorted_values[int(c)] * (k - f)
+        return round(sorted_values[f], 1)
+    d0 = sorted_values[f] * (c - k)
+    d1 = sorted_values[c] * (k - f)
     return round(d0 + d1, 1)
 
 
@@ -44,229 +42,135 @@ async def get_analytics_summary(
 ) -> AnalyticsSummaryResponse:
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
-    # 1. Fetch incidents within window from PostgreSQL
-    inc_stmt = (
-        select(Incident)
-        .where(Incident.created_at >= cutoff)
-        .order_by(Incident.created_at.desc())
-        .limit(1000)
-    )
-    incidents = list(await session.scalars(inc_stmt))
+    # 1. Total & Ratio via SQL aggregate
+    overview = await AnalyticsRepository.get_overview_metrics(session, cutoff)
 
-    total_incidents = len(incidents)
-    active_incidents = sum(1 for i in incidents if i.resolved_at is None)
-    resolved_incidents = sum(1 for i in incidents if i.resolved_at is not None)
-
-    # 2. MTTA Calculation (acknowledged_at - detected_at in minutes)
-    mtta_durations = []
-    for inc in incidents:
-        ack = inc.acknowledged_at
-        det = inc.detected_at
-        if ack and det:
-            if ack.tzinfo is None:
-                ack = ack.replace(tzinfo=UTC)
-            if det.tzinfo is None:
-                det = det.replace(tzinfo=UTC)
-            diff = (ack - det).total_seconds() / 60.0
-            if diff >= 0:
-                mtta_durations.append(diff)
-
-    mean_mtta = round(sum(mtta_durations) / len(mtta_durations), 1) if mtta_durations else 0.0
+    # 2. MTTA via SQL AVG with FILTER
+    mtta_data = await AnalyticsRepository.get_mtta_metrics(session, cutoff)
     mtta = MTTAMetric(
-        mean_minutes=mean_mtta,
-        count=len(mtta_durations),
+        mean_minutes=mtta_data["mean_minutes"],
+        count=mtta_data["count"],
     )
 
-    # 3. MTTR Calculation (resolved_at - detected_at in minutes)
-    mttr_durations = []
-    for inc in incidents:
-        res = inc.resolved_at
-        det = inc.detected_at
-        if res and det:
-            if res.tzinfo is None:
-                res = res.replace(tzinfo=UTC)
-            if det.tzinfo is None:
-                det = det.replace(tzinfo=UTC)
-            diff = (res - det).total_seconds() / 60.0
-            if diff >= 0:
-                mttr_durations.append(diff)
-
-    mttr_durations.sort()
-    mean_mttr = round(sum(mttr_durations) / len(mttr_durations), 1) if mttr_durations else 0.0
-    median_mttr = calculate_percentile(mttr_durations, 0.50)
-    p95_mttr = calculate_percentile(mttr_durations, 0.95)
-
+    # 3. MTTR Mean, Median, P95 via SQL PERCENTILE_CONT ... WITHIN GROUP
+    mttr_data = await AnalyticsRepository.get_mttr_metrics(session, cutoff)
     mttr = MTTRMetric(
-        mean_minutes=mean_mttr,
-        median_minutes=median_mttr,
-        p95_minutes=p95_mttr,
-        count=len(mttr_durations),
+        mean_minutes=mttr_data["mean_minutes"],
+        median_minutes=mttr_data["median_minutes"],
+        p95_minutes=mttr_data["p95_minutes"],
+        count=mttr_data["count"],
     )
 
-    # 4. Total Alerts & Ratio
-    alert_count_stmt = select(func.count(Alert.id)).where(Alert.created_at >= cutoff)
-    total_alerts = (await session.scalar(alert_count_stmt)) or 0
-    alert_ratio = round(total_alerts / total_incidents, 2) if total_incidents > 0 else 0.0
-
-    # 5. Severity Breakdown
-    sev_counts: dict[str, int] = defaultdict(int)
-    for inc in incidents:
-        sev_val = inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
-        sev_key = sev_val.upper()
-        sev_counts[sev_key] += 1
-
+    # 4. Severity Breakdown via SQL window functions
+    sev_rows = await AnalyticsRepository.get_severity_breakdown(session, cutoff)
     severity_breakdown = [
         SeverityCount(
-            severity=sev,
-            count=count,
-            percentage=round((count / total_incidents) * 100.0, 1) if total_incidents > 0 else 0.0,
+            severity=r["severity"],
+            count=r["count"],
+            percentage=r["percentage"],
         )
-        for sev, count in sorted(sev_counts.items())
+        for r in sev_rows
     ]
 
-    # 6. Incidents by Service
-    services_stmt = select(Service)
-    services = list(await session.scalars(services_stmt))
-    service_map = {s.id: s.name for s in services}
-
-    service_incidents: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "sev1": 0})
-    for inc in incidents:
-        if inc.service_id:
-            sid = str(inc.service_id)
-            service_incidents[sid]["total"] += 1
-            sev_val = inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
-            if sev_val.upper() == "SEV1":
-                service_incidents[sid]["sev1"] += 1
-
+    # 5. Incidents by Service via SQL JOIN & FILTER
+    svc_rows = await AnalyticsRepository.get_incidents_by_service(session, cutoff)
     incidents_by_service = [
         ServiceIncidentCount(
-            service_id=s_id,
-            service_name=service_map.get(s_id, "Unknown Service"),  # type: ignore
-            count=data["total"],
-            sev1_count=data["sev1"],
+            service_id=r["service_id"],
+            service_name=r["service_name"],
+            count=r["count"],
+            sev1_count=r["sev1_count"],
         )
-        for s_id, data in service_incidents.items()
-        if s_id
+        for r in svc_rows
     ]
-    incidents_by_service.sort(key=lambda x: x.count, reverse=True)
 
-    # 7. Incident Trends (daily buckets over last 14 days)
-    trends_map: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"count": 0, "sev1": 0, "sev2": 0, "sev3": 0, "sev4": 0}
-    )
-    for i in range(14):
-        d_str = (datetime.now(UTC) - timedelta(days=13 - i)).strftime("%Y-%m-%d")
-        _ = trends_map[d_str]
-
-    for inc in incidents:
-        created = inc.created_at
-        if created:
-            d_str = created.strftime("%Y-%m-%d")
-            if d_str in trends_map:
-                trends_map[d_str]["count"] += 1
-                sev_val = (
-                    inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
-                )
-                sev_key = sev_val.lower()
-                if sev_key in trends_map[d_str]:
-                    trends_map[d_str][sev_key] += 1
-
+    # 6. Incident Trends via SQL generate_series
+    trend_rows = await AnalyticsRepository.get_incident_trends(session, days_count=14)
     incident_trends = [
         IncidentTrendPoint(
-            date=d_str,
-            count=data["count"],
-            sev1=data["sev1"],
-            sev2=data["sev2"],
-            sev3=data["sev3"],
-            sev4=data["sev4"],
+            date=r["date"],
+            count=r["count"],
+            sev1=r["sev1"],
+            sev2=r["sev2"],
+            sev3=r["sev3"],
+            sev4=r["sev4"],
         )
-        for d_str, data in sorted(trends_map.items())
+        for r in trend_rows
     ]
 
-    # 8. Service Reliability
-    service_reliability = []
-    for s in services:
-        checks_stmt = (
-            select(ServiceHealthCheck)
-            .where(
-                ServiceHealthCheck.service_id == s.id,
-                ServiceHealthCheck.created_at >= cutoff,
-            )
-            .limit(100)
+    # 7. Service Reliability via SQL aggregates
+    rel_rows = await AnalyticsRepository.get_service_reliability(session, cutoff)
+    service_reliability = [
+        ServiceReliabilityMetric(
+            service_id=r["service_id"],
+            service_name=r["service_name"],
+            uptime_percentage=r["uptime_percentage"],
+            total_checks=r["total_checks"],
+            avg_latency_ms=r["avg_latency_ms"],
         )
-        checks = list(await session.scalars(checks_stmt))
-        total_checks = len(checks)
-        uptime = 100.0
-        avg_lat = None
-        if total_checks > 0:
-            up_count = sum(1 for c in checks if c.availability)
-            uptime = round((up_count / total_checks) * 100.0, 1)
-            valid_lat = [c.response_time_ms for c in checks if c.response_time_ms is not None]
-            if valid_lat:
-                avg_lat = round(sum(valid_lat) / len(valid_lat), 1)
+        for r in rel_rows
+    ]
 
-        service_reliability.append(
-            ServiceReliabilityMetric(
-                service_id=s.id,
-                service_name=s.name,
-                uptime_percentage=uptime,
-                total_checks=total_checks,
-                avg_latency_ms=avg_lat,
-            )
-        )
-
-    # 9. Recurring Incident Pattern Detection
-    pattern_definitions = [
+    # 8. Recurring Patterns via SQL ILIKE query
+    patterns_def = [
         (
             "DB_CONNECTION_EXHAUSTION",
             "Database connection pool saturation or timeout",
-            ["pool", "timeout", "exhaust", "connection"],
+            "%pool%",
         ),
         (
             "HIGH_LATENCY_DEGRADATION",
             "Upstream API response latency or threshold degradation",
-            ["latency", "slow", "delay", "degraded"],
+            "%latency%",
         ),
         (
             "5XX_SPIKE",
             "Elevated HTTP 5xx or server internal errors",
-            ["5xx", "500", "502", "503", "504", "error rate"],
+            "%5xx%",
         ),
         (
             "MEMORY_PRESSURE",
             "High memory usage or garbage collection pauses",
-            ["memory", "oom", "leak", "heap"],
+            "%memory%",
         ),
     ]
 
     recurring_patterns = []
-    for key, desc, keywords in pattern_definitions:
-        matched_incidents = []
-        affected_services = set()
-        for inc in incidents:
-            text = f"{inc.title} {inc.description or ''}".lower()
-            if any(kw in text for kw in keywords):
-                matched_incidents.append(inc.id)
-                if inc.service_id:
-                    affected_services.add(service_map.get(inc.service_id, "Unknown"))
-
-        if len(matched_incidents) >= 1:
+    pattern_stmt = text(
+        """
+        SELECT i.id, coalesce(s.name, 'Unknown') AS service_name
+        FROM incidents i
+        LEFT JOIN services s ON i.service_id = s.id
+        WHERE i.created_at >= :cutoff
+          AND (i.title ILIKE :pattern OR i.description ILIKE :pattern)
+        LIMIT 10;
+        """
+    )
+    for p_key, p_desc, pattern_kw in patterns_def:
+        matches = (
+            (await session.execute(pattern_stmt, {"cutoff": cutoff, "pattern": pattern_kw}))
+            .mappings()
+            .all()
+        )
+        if matches:
+            aff_services = list({r["service_name"] for r in matches})
+            inc_ids = [r["id"] for r in matches[:5]]
             recurring_patterns.append(
                 RecurringPattern(
-                    pattern_key=key,
-                    description=desc,
-                    occurrences=len(matched_incidents),
-                    affected_services=list(affected_services),
-                    sample_incident_ids=matched_incidents[:5],
+                    pattern_key=p_key,
+                    description=p_desc,
+                    occurrences=len(matches),
+                    affected_services=aff_services,
+                    sample_incident_ids=inc_ids,
                 )
             )
 
     return AnalyticsSummaryResponse(
-        total_incidents=total_incidents,
-        active_incidents=active_incidents,
-        resolved_incidents=resolved_incidents,
-        alert_count=total_alerts,
-        alert_to_incident_ratio=alert_ratio,
+        total_incidents=overview["total_incidents"],
+        active_incidents=overview["active_incidents"],
+        resolved_incidents=overview["resolved_incidents"],
+        alert_count=overview["alert_count"],
+        alert_to_incident_ratio=overview["alert_to_incident_ratio"],
         mtta=mtta,
         mttr=mttr,
         severity_breakdown=severity_breakdown,
@@ -274,4 +178,36 @@ async def get_analytics_summary(
         incident_trends=incident_trends,
         service_reliability=service_reliability,
         recurring_patterns=recurring_patterns,
+    )
+
+
+@router.get("/breakdown")
+async def get_mtta_mttr_breakdown(
+    days: int = Query(default=30, ge=1, le=365),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """MTTA and MTTR per service and per severity calculated using SQL AVG with FILTER."""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    return await AnalyticsRepository.get_mtta_mttr_by_service_and_severity(session, cutoff)
+
+
+@router.get("/incidents/{incident_id}/status-durations")
+async def get_incident_status_durations(
+    incident_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Calculates time spent in each status transition using SQL LAG() over timeline_events."""
+    return await AnalyticsRepository.get_time_spent_in_status_lag(session, incident_id)
+
+
+@router.get("/noisy-alerts")
+async def get_noisy_alerts(
+    days: int = Query(default=30, ge=1, le=365),
+    min_count: int = Query(default=1, ge=1),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Top noisy alert sources identified using SQL GROUP BY, HAVING, and ORDER BY."""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    return await AnalyticsRepository.get_top_noisy_alert_sources(
+        session, cutoff, min_count=min_count
     )
