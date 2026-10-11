@@ -3,9 +3,13 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import clean_doc, get_db
+from app.core.database import get_session
+from app.models.alert import Alert
+from app.models.incident import Incident
+from app.models.service import Service, ServiceHealthCheck
 from app.schemas.analytics import (
     AnalyticsSummaryResponse,
     IncidentTrendPoint,
@@ -36,24 +40,28 @@ def calculate_percentile(sorted_values: list[float], percentile: float) -> float
 @router.get("/summary", response_model=AnalyticsSummaryResponse)
 async def get_analytics_summary(
     days: int = Query(default=30, ge=1, le=365),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> AnalyticsSummaryResponse:
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
-    # 1. Fetch incidents within window
-    cursor = db.incidents.find({"created_at": {"$gte": cutoff}})
-    incidents_raw = await cursor.to_list(1000)
-    incidents = [clean_doc(i) for i in incidents_raw]
+    # 1. Fetch incidents within window from PostgreSQL
+    inc_stmt = (
+        select(Incident)
+        .where(Incident.created_at >= cutoff)
+        .order_by(Incident.created_at.desc())
+        .limit(1000)
+    )
+    incidents = list(await session.scalars(inc_stmt))
 
     total_incidents = len(incidents)
-    active_incidents = sum(1 for i in incidents if i.get("resolved_at") is None)
-    resolved_incidents = sum(1 for i in incidents if i.get("resolved_at") is not None)
+    active_incidents = sum(1 for i in incidents if i.resolved_at is None)
+    resolved_incidents = sum(1 for i in incidents if i.resolved_at is not None)
 
     # 2. MTTA Calculation (acknowledged_at - detected_at in minutes)
     mtta_durations = []
     for inc in incidents:
-        ack = inc.get("acknowledged_at")
-        det = inc.get("detected_at")
+        ack = inc.acknowledged_at
+        det = inc.detected_at
         if ack and det:
             if ack.tzinfo is None:
                 ack = ack.replace(tzinfo=UTC)
@@ -72,8 +80,8 @@ async def get_analytics_summary(
     # 3. MTTR Calculation (resolved_at - detected_at in minutes)
     mttr_durations = []
     for inc in incidents:
-        res = inc.get("resolved_at")
-        det = inc.get("detected_at")
+        res = inc.resolved_at
+        det = inc.detected_at
         if res and det:
             if res.tzinfo is None:
                 res = res.replace(tzinfo=UTC)
@@ -96,13 +104,15 @@ async def get_analytics_summary(
     )
 
     # 4. Total Alerts & Ratio
-    total_alerts = await db.alerts.count_documents({"created_at": {"$gte": cutoff}})
+    alert_count_stmt = select(func.count(Alert.id)).where(Alert.created_at >= cutoff)
+    total_alerts = (await session.scalar(alert_count_stmt)) or 0
     alert_ratio = round(total_alerts / total_incidents, 2) if total_incidents > 0 else 0.0
 
     # 5. Severity Breakdown
     sev_counts: dict[str, int] = defaultdict(int)
     for inc in incidents:
-        sev_key = str(inc.get("severity", "sev3")).upper()
+        sev_val = inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
+        sev_key = sev_val.upper()
         sev_counts[sev_key] += 1
 
     severity_breakdown = [
@@ -115,20 +125,23 @@ async def get_analytics_summary(
     ]
 
     # 6. Incidents by Service
-    services_raw = await db.services.find().to_list(100)
-    services = [clean_doc(s) for s in services_raw]
-    service_map = {s["id"]: s["name"] for s in services}
+    services_stmt = select(Service)
+    services = list(await session.scalars(services_stmt))
+    service_map = {s.id: s.name for s in services}
+
     service_incidents: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "sev1": 0})
     for inc in incidents:
-        sid = str(inc.get("service_id", ""))
-        service_incidents[sid]["total"] += 1
-        if str(inc.get("severity", "")).upper() == "SEV1":
-            service_incidents[sid]["sev1"] += 1
+        if inc.service_id:
+            sid = str(inc.service_id)
+            service_incidents[sid]["total"] += 1
+            sev_val = inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
+            if sev_val.upper() == "SEV1":
+                service_incidents[sid]["sev1"] += 1
 
     incidents_by_service = [
         ServiceIncidentCount(
             service_id=s_id,
-            service_name=service_map.get(s_id, "Unknown Service"),
+            service_name=service_map.get(s_id, "Unknown Service"),  # type: ignore
             count=data["total"],
             sev1_count=data["sev1"],
         )
@@ -146,12 +159,15 @@ async def get_analytics_summary(
         _ = trends_map[d_str]
 
     for inc in incidents:
-        created = inc.get("created_at")
+        created = inc.created_at
         if created:
             d_str = created.strftime("%Y-%m-%d")
             if d_str in trends_map:
                 trends_map[d_str]["count"] += 1
-                sev_key = str(inc.get("severity", "")).lower()
+                sev_val = (
+                    inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity)
+                )
+                sev_key = sev_val.lower()
                 if sev_key in trends_map[d_str]:
                     trends_map[d_str][sev_key] += 1
 
@@ -170,27 +186,29 @@ async def get_analytics_summary(
     # 8. Service Reliability
     service_reliability = []
     for s in services:
-        sid = str(s["id"])
-        checks_raw = await db.health_checks.find(
-            {"service_id": sid, "created_at": {"$gte": cutoff}}
-        ).to_list(100)
-        checks = [clean_doc(c) for c in checks_raw]
+        checks_stmt = (
+            select(ServiceHealthCheck)
+            .where(
+                ServiceHealthCheck.service_id == s.id,
+                ServiceHealthCheck.created_at >= cutoff,
+            )
+            .limit(100)
+        )
+        checks = list(await session.scalars(checks_stmt))
         total_checks = len(checks)
         uptime = 100.0
         avg_lat = None
         if total_checks > 0:
-            up_count = sum(1 for c in checks if c.get("availability"))
+            up_count = sum(1 for c in checks if c.availability)
             uptime = round((up_count / total_checks) * 100.0, 1)
-            valid_lat = [
-                c["response_time_ms"] for c in checks if c.get("response_time_ms") is not None
-            ]
+            valid_lat = [c.response_time_ms for c in checks if c.response_time_ms is not None]
             if valid_lat:
                 avg_lat = round(sum(valid_lat) / len(valid_lat), 1)
 
         service_reliability.append(
             ServiceReliabilityMetric(
-                service_id=s["id"],
-                service_name=s["name"],
+                service_id=s.id,
+                service_name=s.name,
                 uptime_percentage=uptime,
                 total_checks=total_checks,
                 avg_latency_ms=avg_lat,
@@ -226,11 +244,11 @@ async def get_analytics_summary(
         matched_incidents = []
         affected_services = set()
         for inc in incidents:
-            text = f"{inc.get('title', '')} {inc.get('description') or ''}".lower()
+            text = f"{inc.title} {inc.description or ''}".lower()
             if any(kw in text for kw in keywords):
-                matched_incidents.append(inc["id"])
-                sid = str(inc.get("service_id", ""))
-                affected_services.add(service_map.get(sid, "Unknown"))
+                matched_incidents.append(inc.id)
+                if inc.service_id:
+                    affected_services.add(service_map.get(inc.service_id, "Unknown"))
 
         if len(matched_incidents) >= 1:
             recurring_patterns.append(

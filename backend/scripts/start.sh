@@ -2,7 +2,7 @@
 set -eu
 
 if [ "${AUTO_SEED:-false}" = "true" ]; then
-    echo "AUTO_SEED=true: Seeding MongoDB database with initial scenario..."
+    echo "AUTO_SEED=true: Seeding PostgreSQL database with initial scenario..."
     python -m app.scripts.seed || echo "Seed skipped or already populated."
 fi
 

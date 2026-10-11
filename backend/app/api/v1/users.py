@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserAuth, current_user
-from app.core.database import clean_doc, get_db
+from app.core.database import get_session
 from app.domain.permissions import ROLE_PERMISSIONS
 from app.models.enums import Role
+from app.repositories.user_repo import UserRepository
 from app.schemas.user import UserMe, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -14,11 +15,13 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/me", response_model=UserMe)
 async def get_me(
-    user: UserAuth = Depends(current_user), db: AsyncIOMotorDatabase = Depends(get_db)
+    user: UserAuth = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
 ) -> UserMe:
-    doc = await db.users.find_one({"id": user.id})
-    created_at = doc.get("created_at") if doc else datetime.now(UTC)
-    permissions = list(ROLE_PERMISSIONS.get(Role(user.role), set()))
+    db_user = await UserRepository.get_by_id(session, user.id)
+    created_at = db_user.created_at if db_user else datetime.now(UTC)
+    role_enum = Role(user.role) if isinstance(user.role, str) else user.role
+    permissions = list(ROLE_PERMISSIONS.get(role_enum, set()))
     return UserMe(
         id=user.id,
         email=user.email,
@@ -32,9 +35,18 @@ async def get_me(
 
 @router.get("", response_model=list[UserRead])
 async def list_users(
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     _: UserAuth = Depends(current_user),
 ) -> list[UserRead]:
-    cursor = db.users.find({"is_active": True}).sort("full_name", 1)
-    docs = await cursor.to_list(100)
-    return [UserRead(**clean_doc(d)) for d in docs]  # type: ignore
+    users = await UserRepository.list_active(session)
+    return [
+        UserRead(
+            id=u.id,
+            email=u.email,
+            full_name=u.full_name,
+            role=u.role.value if hasattr(u.role, "value") else str(u.role),
+            is_active=u.is_active,
+            created_at=u.created_at,
+        )
+        for u in users
+    ]

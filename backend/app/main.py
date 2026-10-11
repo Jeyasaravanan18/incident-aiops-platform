@@ -10,23 +10,15 @@ from starlette.responses import Response
 from app.api.v1.router import api_router
 from app.api.v1.websockets import router as websocket_router
 from app.core.config import settings
-from app.core.database import engine, get_database, get_mongo_client, init_db_indexes
+from app.core.database import engine
 from app.core.errors import AppError, app_error_handler
 from app.core.middleware import RequestIDMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        await init_db_indexes()
-    except Exception:
-        pass
     yield
-    try:
-        client = get_mongo_client()
-        client.close()
-    except Exception:
-        pass
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -61,16 +53,11 @@ async def health() -> dict[str, str]:
 async def ready() -> dict[str, str]:
     db_status = "offline"
     try:
-        db = get_database()
-        await db.command("ping")
+        async with engine.connect() as connection:
+            await connection.execute(text("select 1"))
         db_status = "connected"
     except Exception:
-        try:
-            async with engine.connect() as connection:
-                await connection.execute(text("select 1"))
-            db_status = "connected"
-        except Exception:
-            pass
+        pass
 
     redis_status = "offline"
     try:
@@ -80,6 +67,7 @@ async def ready() -> dict[str, str]:
         redis_status = "connected"
     except Exception:
         pass
+
     return {"status": "ready", "database": db_status, "redis": redis_status}
 
 

@@ -28,9 +28,15 @@ class IncidentReopen(BaseModel):
     reason: str = Field(min_length=5, max_length=1000)
 
 
+IncidentReopenPayload = IncidentReopen
+
+
 class IncidentAssignRequest(BaseModel):
     assignee_id: UUID
     reason: str | None = None
+
+
+IncidentAssignPayload = IncidentAssignRequest
 
 
 class IncidentAssignmentRead(BaseModel):

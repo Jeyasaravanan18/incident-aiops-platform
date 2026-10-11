@@ -1,28 +1,35 @@
 from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserAuth, current_user, require_permission
-from app.core.database import clean_doc, get_db
+from app.core.database import get_session
 from app.core.errors import AppError
 from app.domain.incidents import (
+    calculate_severity,
     transition_timestamp_fields,
     validate_reopen,
     validate_transition,
 )
-from app.models.enums import IncidentSeverity, IncidentStatus
+from app.models.enums import (
+    AlertSeverity,
+    IncidentSeverity,
+    IncidentStatus,
+)
+from app.repositories.incident_repo import IncidentRepository
+from app.repositories.service_repo import ServiceRepository
+from app.repositories.user_repo import UserRepository
 from app.schemas.alert import AlertRead
 from app.schemas.incident import (
-    IncidentAssignRequest,
+    IncidentAssignPayload,
     IncidentCommentCreate,
     IncidentCommentRead,
     IncidentCreate,
     IncidentDetailRead,
     IncidentRead,
-    IncidentReopen,
+    IncidentReopenPayload,
     IncidentTransition,
     IncidentUpdate,
     TimelineEventRead,
@@ -32,250 +39,228 @@ from app.websocket.manager import websocket_manager
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 
-async def _enrich_incident_read(inc_doc: dict[str, Any], db: AsyncIOMotorDatabase) -> IncidentRead:
-    clean_inc = clean_doc(inc_doc)
-    sid = clean_inc.get("service_id")
+async def _enrich_incident_read(session: AsyncSession, inc) -> IncidentRead:
     s_name = None
-    if sid:
-        s_doc = await db.services.find_one({"id": str(sid)})
-        if s_doc:
-            s_name = s_doc.get("name")
+    if inc.service_id:
+        svc = await ServiceRepository.get_by_id(session, inc.service_id)
+        if svc:
+            s_name = svc.name
 
-    aid = clean_inc.get("assignee_id")
-    a_name = None
-    if aid:
-        u_doc = await db.users.find_one({"id": str(aid)})
-        if u_doc:
-            a_name = u_doc.get("full_name")
+    u_name = None
+    if inc.assignee_id:
+        user = await UserRepository.get_by_id(session, inc.assignee_id)
+        if user:
+            u_name = user.full_name
 
     return IncidentRead(
-        id=clean_inc["id"],
-        service_id=clean_inc["service_id"],
+        id=inc.id,
+        service_id=inc.service_id,
         service_name=s_name,
-        title=clean_inc["title"],
-        description=clean_inc.get("description"),
-        status=clean_inc.get("status", IncidentStatus.TRIGGERED.value),
-        severity=clean_inc.get("severity", IncidentSeverity.SEV3.value),
-        detected_at=clean_inc.get("detected_at"),
-        acknowledged_at=clean_inc.get("acknowledged_at"),
-        resolved_at=clean_inc.get("resolved_at"),
-        closed_at=clean_inc.get("closed_at"),
-        assignee_id=clean_inc.get("assignee_id"),
-        assignee_name=a_name,
-        created_at=clean_inc.get("created_at"),
-        updated_at=clean_inc.get("updated_at"),
+        title=inc.title,
+        description=inc.description,
+        status=inc.status.value if hasattr(inc.status, "value") else str(inc.status),
+        severity=inc.severity.value if hasattr(inc.severity, "value") else str(inc.severity),
+        detected_at=inc.detected_at,
+        acknowledged_at=inc.acknowledged_at,
+        resolved_at=inc.resolved_at,
+        closed_at=inc.closed_at,
+        assignee_id=inc.assignee_id,
+        assignee_name=u_name,
+        created_at=inc.created_at,
+        updated_at=inc.updated_at,
     )
 
 
 @router.get("", response_model=list[IncidentRead])
 async def list_incidents(
+    service_id: UUID | None = Query(default=None),
     status: IncidentStatus | None = Query(default=None),
     severity: IncidentSeverity | None = Query(default=None),
-    service_id: UUID | None = Query(default=None),
-    assignee_id: UUID | None = Query(default=None),
-    search: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> list[IncidentRead]:
-    query: dict[str, Any] = {}
-    if status is not None:
-        query["status"] = str(status)
-    if severity is not None:
-        query["severity"] = str(severity)
-    if service_id is not None:
-        query["service_id"] = str(service_id)
-    if assignee_id is not None:
-        query["assignee_id"] = str(assignee_id)
-    if search:
-        query["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}},
-        ]
+    incidents = await IncidentRepository.list_incidents(
+        session=session,
+        service_id=service_id,
+        status=status,
+        severity=severity,
+        limit=limit,
+        offset=offset,
+    )
 
-    cursor = db.incidents.find(query).sort("created_at", -1).skip(offset).limit(limit)
-    docs = await cursor.to_list(limit)
+    # Cache services & users lookup
+    service_ids = {i.service_id for i in incidents if i.service_id}
+    assignee_ids = {i.assignee_id for i in incidents if i.assignee_id}
 
-    # Pre-fetch services and users mapping for high efficiency
-    service_ids = {str(d.get("service_id")) for d in docs if d.get("service_id")}
-    assignee_ids = {str(d.get("assignee_id")) for d in docs if d.get("assignee_id")}
+    s_map = {}
+    for sid in service_ids:
+        s = await ServiceRepository.get_by_id(session, sid)
+        if s:
+            s_map[sid] = s.name
 
-    s_map: dict[str, str] = {}
-    if service_ids:
-        s_docs = await db.services.find({"id": {"$in": list(service_ids)}}).to_list(
-            len(service_ids)
+    u_map = {}
+    for aid in assignee_ids:
+        u = await UserRepository.get_by_id(session, aid)
+        if u:
+            u_map[aid] = u.full_name
+
+    return [
+        IncidentRead(
+            id=i.id,
+            service_id=i.service_id,
+            service_name=s_map.get(i.service_id),
+            title=i.title,
+            description=i.description,
+            status=i.status.value if hasattr(i.status, "value") else str(i.status),
+            severity=i.severity.value if hasattr(i.severity, "value") else str(i.severity),
+            detected_at=i.detected_at,
+            acknowledged_at=i.acknowledged_at,
+            resolved_at=i.resolved_at,
+            closed_at=i.closed_at,
+            assignee_id=i.assignee_id,
+            assignee_name=u_map.get(i.assignee_id),
+            created_at=i.created_at,
+            updated_at=i.updated_at,
         )
-        s_map = {str(s.get("id")): str(s.get("name")) for s in s_docs}
-
-    u_map: dict[str, str] = {}
-    if assignee_ids:
-        u_docs = await db.users.find({"id": {"$in": list(assignee_ids)}}).to_list(len(assignee_ids))
-        u_map = {str(u.get("id")): str(u.get("full_name")) for u in u_docs}
-
-    results = []
-    for inc in docs:
-        c = clean_doc(inc)
-        results.append(
-            IncidentRead(
-                id=c["id"],
-                service_id=c["service_id"],
-                service_name=s_map.get(str(c.get("service_id"))),
-                title=c["title"],
-                description=c.get("description"),
-                status=c.get("status", IncidentStatus.TRIGGERED.value),
-                severity=c.get("severity", IncidentSeverity.SEV3.value),
-                detected_at=c.get("detected_at"),
-                acknowledged_at=c.get("acknowledged_at"),
-                resolved_at=c.get("resolved_at"),
-                closed_at=c.get("closed_at"),
-                assignee_id=c.get("assignee_id"),
-                assignee_name=u_map.get(str(c.get("assignee_id"))),
-                created_at=c.get("created_at"),
-                updated_at=c.get("updated_at"),
-            )
-        )
-    return results
+        for i in incidents
+    ]
 
 
 @router.post("", response_model=IncidentRead, status_code=201)
 async def create_incident(
     payload: IncidentCreate,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("incident:create")),
 ) -> IncidentRead:
-    sid = str(payload.service_id)
-    service = await db.services.find_one({"id": sid})
+    service = await ServiceRepository.get_by_id(session, payload.service_id)
     if service is None:
         raise AppError("SERVICE_NOT_FOUND", "Service not found", 404)
 
     now = datetime.now(UTC)
-    incident_id = str(uuid4())
-    doc = {
-        "id": incident_id,
-        "service_id": sid,
-        "title": payload.title,
-        "description": payload.description,
-        "status": IncidentStatus.TRIGGERED.value,
-        "severity": str(payload.severity),
-        "detected_at": now,
-        "acknowledged_at": None,
-        "resolved_at": None,
-        "closed_at": None,
-        "assignee_id": None,
-        "created_at": now,
-        "updated_at": now,
-    }
-    await db.incidents.insert_one(doc)
+    detected_at = payload.detected_at or now
 
-    ev_doc = {
-        "id": str(uuid4()),
-        "incident_id": incident_id,
-        "actor_id": str(user.id),
-        "event_type": "IncidentCreated",
-        "message": f"Incident created manually by {user.full_name}",
-        "metadata_json": {"created_by": user.email},
-        "created_at": now,
-    }
-    await db.timeline_events.insert_one(ev_doc)
+    if payload.severity is not None:
+        severity = (
+            IncidentSeverity(payload.severity)
+            if isinstance(payload.severity, str)
+            else payload.severity
+        )
+    else:
+        severity = calculate_severity(AlertSeverity.CRITICAL, service.criticality)
+
+    incident = await IncidentRepository.create_incident(
+        session=session,
+        service_id=payload.service_id,
+        title=payload.title,
+        description=payload.description,
+        status=IncidentStatus.TRIGGERED,
+        severity=severity,
+        detected_at=detected_at,
+    )
+
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=incident.id,
+        event_type="IncidentDeclared",
+        message=f"Incident declared: '{payload.title}' by {user.full_name}",
+        actor_id=user.id,
+        metadata_json={"severity": severity.value},
+    )
 
     await websocket_manager.broadcast(
         "dashboard",
-        {"type": "IncidentCreated", "incident_id": incident_id, "severity": str(payload.severity)},
+        {
+            "type": "IncidentCreated",
+            "incident_id": str(incident.id),
+            "service_id": str(payload.service_id),
+            "severity": severity.value,
+            "title": payload.title,
+        },
     )
 
-    return await _enrich_incident_read(doc, db)
+    return await _enrich_incident_read(session, incident)
 
 
 @router.get("/{incident_id}", response_model=IncidentDetailRead)
 async def get_incident(
     incident_id: UUID,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> IncidentDetailRead:
-    iid = str(incident_id)
-    inc = await db.incidents.find_one({"id": iid})
-    if inc is None:
+    incident = await IncidentRepository.get_by_id(session, incident_id)
+    if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
-    clean_inc = clean_doc(inc)
 
     s_name = None
-    if clean_inc.get("service_id"):
-        s_doc = await db.services.find_one({"id": str(clean_inc["service_id"])})
-        if s_doc:
-            s_name = s_doc.get("name")
+    if incident.service_id:
+        svc = await ServiceRepository.get_by_id(session, incident.service_id)
+        if svc:
+            s_name = svc.name
 
-    a_name = None
-    if clean_inc.get("assignee_id"):
-        u_doc = await db.users.find_one({"id": str(clean_inc["assignee_id"])})
-        if u_doc:
-            a_name = u_doc.get("full_name")
+    u_name = None
+    if incident.assignee_id:
+        u = await UserRepository.get_by_id(session, incident.assignee_id)
+        if u:
+            u_name = u.full_name
 
-    # Timeline events
-    t_docs = await db.timeline_events.find({"incident_id": iid}).sort("created_at", 1).to_list(200)
-    actor_ids = {str(t.get("actor_id")) for t in t_docs if t.get("actor_id")}
-    actors_map: dict[str, str] = {}
-    if actor_ids:
-        a_users = await db.users.find({"id": {"$in": list(actor_ids)}}).to_list(len(actor_ids))
-        actors_map = {str(u["id"]): str(u["full_name"]) for u in a_users}
+    timeline_events = await IncidentRepository.list_timeline_events(session, incident_id)
+    comments = await IncidentRepository.list_comments(session, incident_id)
+    alert_count = await IncidentRepository.count_incident_alerts(session, incident_id)
 
-    timeline_events = [
-        TimelineEventRead(
-            id=t["id"],
-            incident_id=t["incident_id"],
-            actor_id=t.get("actor_id"),
-            actor_name=actors_map.get(str(t.get("actor_id"))),
-            event_type=t["event_type"],
-            message=t["message"],
-            metadata_json=t.get("metadata_json") or {},
-            created_at=t["created_at"],
-        )
-        for t in [clean_doc(d) for d in t_docs]
-    ]
-
-    # Comments
-    c_docs = (
-        await db.incident_comments.find({"incident_id": iid}).sort("created_at", 1).to_list(200)
-    )
-    c_author_ids = {str(c.get("author_id")) for c in c_docs if c.get("author_id")}
-    authors_map: dict[str, str] = {}
-    if c_author_ids:
-        c_users = await db.users.find({"id": {"$in": list(c_author_ids)}}).to_list(
-            len(c_author_ids)
-        )
-        authors_map = {str(u["id"]): str(u["full_name"]) for u in c_users}
-
-    comments = [
-        IncidentCommentRead(
-            id=c["id"],
-            incident_id=c["incident_id"],
-            author_id=c["author_id"],
-            author_name=authors_map.get(str(c["author_id"])),
-            body=c["body"],
-            created_at=c["created_at"],
-            edited_at=c.get("edited_at"),
-        )
-        for c in [clean_doc(d) for d in c_docs]
-    ]
-
-    alert_count = await db.alerts.count_documents({"incident_id": iid})
+    # Actor names
+    actor_ids = {e.actor_id for e in timeline_events if e.actor_id}
+    author_ids = {c.author_id for c in comments if c.author_id}
+    user_cache = {}
+    for uid in actor_ids | author_ids:
+        usr = await UserRepository.get_by_id(session, uid)
+        if usr:
+            user_cache[uid] = usr.full_name
 
     return IncidentDetailRead(
-        id=clean_inc["id"],
-        service_id=clean_inc["service_id"],
+        id=incident.id,
+        service_id=incident.service_id,
         service_name=s_name,
-        title=clean_inc["title"],
-        description=clean_inc.get("description"),
-        status=clean_inc.get("status", IncidentStatus.TRIGGERED.value),
-        severity=clean_inc.get("severity", IncidentSeverity.SEV3.value),
-        detected_at=clean_inc.get("detected_at"),
-        acknowledged_at=clean_inc.get("acknowledged_at"),
-        resolved_at=clean_inc.get("resolved_at"),
-        closed_at=clean_inc.get("closed_at"),
-        assignee_id=clean_inc.get("assignee_id"),
-        assignee_name=a_name,
-        created_at=clean_inc.get("created_at"),
-        updated_at=clean_inc.get("updated_at"),
-        timeline_events=timeline_events,
-        comments=comments,
+        title=incident.title,
+        description=incident.description,
+        status=incident.status.value if hasattr(incident.status, "value") else str(incident.status),
+        severity=(
+            incident.severity.value
+            if hasattr(incident.severity, "value")
+            else str(incident.severity)
+        ),
+        detected_at=incident.detected_at,
+        acknowledged_at=incident.acknowledged_at,
+        resolved_at=incident.resolved_at,
+        closed_at=incident.closed_at,
+        assignee_id=incident.assignee_id,
+        assignee_name=u_name,
+        created_at=incident.created_at,
+        updated_at=incident.updated_at,
+        timeline_events=[
+            TimelineEventRead(
+                id=e.id,
+                incident_id=e.incident_id,
+                actor_id=e.actor_id,
+                actor_name=user_cache.get(e.actor_id),
+                event_type=e.event_type,
+                message=e.message,
+                metadata_json=e.metadata_json or {},
+                created_at=e.created_at,
+            )
+            for e in timeline_events
+        ],
+        comments=[
+            IncidentCommentRead(
+                id=c.id,
+                incident_id=c.incident_id,
+                author_id=c.author_id,
+                author_name=user_cache.get(c.author_id),
+                body=c.body,
+                created_at=c.created_at,
+                edited_at=c.edited_at,
+            )
+            for c in comments
+        ],
         alert_count=alert_count,
     )
 
@@ -284,378 +269,310 @@ async def get_incident(
 async def update_incident(
     incident_id: UUID,
     payload: IncidentUpdate,
-    db: AsyncIOMotorDatabase = Depends(get_db),
-    user: UserAuth = Depends(require_permission("incident:update")),
+    session: AsyncSession = Depends(get_session),
+    _: UserAuth = Depends(require_permission("incident:update")),
 ) -> IncidentRead:
-    iid = str(incident_id)
-    incident = await db.incidents.find_one({"id": iid})
+    incident = await IncidentRepository.get_by_id(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    changes = []
-    updates: dict[str, Any] = {}
-    if payload.title is not None and payload.title != incident.get("title"):
-        changes.append(f"title changed to '{payload.title}'")
-        updates["title"] = payload.title
-
-    if payload.description is not None and payload.description != incident.get("description"):
-        changes.append("description updated")
-        updates["description"] = payload.description
-
-    if payload.severity is not None and str(payload.severity) != str(incident.get("severity")):
-        old_sev = incident.get("severity")
-        changes.append(f"severity changed from {old_sev} to {payload.severity}")
-        updates["severity"] = str(payload.severity)
-
-    if changes:
-        updates["updated_at"] = datetime.now(UTC)
-        await db.incidents.update_one({"id": iid}, {"$set": updates})
-
-        await db.timeline_events.insert_one(
-            {
-                "id": str(uuid4()),
-                "incident_id": iid,
-                "actor_id": str(user.id),
-                "event_type": "IncidentUpdated",
-                "message": f"Incident updated by {user.full_name}: {', '.join(changes)}",
-                "metadata_json": {"updated_by": user.email, "changes": changes},
-                "created_at": datetime.now(UTC),
-            }
+    updates = payload.model_dump(exclude_unset=True)
+    if "severity" in updates and updates["severity"] is not None:
+        updates["severity"] = (
+            IncidentSeverity(updates["severity"])
+            if isinstance(updates["severity"], str)
+            else updates["severity"]
         )
 
-        event = {"type": "IncidentUpdated", "incident_id": iid, "changes": changes}
-        await websocket_manager.broadcast("dashboard", event)
-        await websocket_manager.broadcast(f"incident:{iid}", event)
-
-    updated_doc = await db.incidents.find_one({"id": iid})
-    return await _enrich_incident_read(updated_doc, db)  # type: ignore
+    updated = await IncidentRepository.update_incident(session, incident, updates)
+    return await _enrich_incident_read(session, updated)
 
 
 @router.post("/{incident_id}/transition", response_model=IncidentRead)
 async def transition_incident(
     incident_id: UUID,
     payload: IncidentTransition,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("incident:update")),
 ) -> IncidentRead:
-    iid = str(incident_id)
-    incident = await db.incidents.find_one({"id": iid})
+    incident = await IncidentRepository.get_by_id(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    clean_i = clean_doc(incident)
-    current_status = IncidentStatus(clean_i.get("status", IncidentStatus.TRIGGERED.value))
-    validate_transition(current_status, payload.status)
+    current_status = (
+        IncidentStatus(incident.status) if isinstance(incident.status, str) else incident.status
+    )
+    target_status = (
+        IncidentStatus(payload.status) if isinstance(payload.status, str) else payload.status
+    )
 
-    now = datetime.now(UTC)
-    updates: dict[str, Any] = {
-        "status": str(payload.status),
-        "updated_at": now,
-    }
+    validate_transition(current_status, target_status)
 
-    for field, value in transition_timestamp_fields(payload.status).items():
-        updates[field] = value
+    updates = {"status": target_status}
+    for field, val in transition_timestamp_fields(target_status).items():
+        updates[field] = val
 
-    await db.incidents.update_one({"id": iid}, {"$set": updates})
+    updated = await IncidentRepository.update_incident(session, incident, updates)
 
-    msg = f"Status changed from {current_status} to {payload.status} by {user.full_name}"
+    msg = f"Status changed from {current_status.value} to {target_status.value} by {user.full_name}"
     if payload.reason:
         msg += f" (Reason: {payload.reason})"
 
-    await db.timeline_events.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": iid,
-            "actor_id": str(user.id),
-            "event_type": "IncidentStatusChanged",
-            "message": msg,
-            "metadata_json": {
-                "from": str(current_status),
-                "to": str(payload.status),
-                "reason": payload.reason,
-            },
-            "created_at": now,
-        }
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=incident.id,
+        event_type="IncidentStatusChanged",
+        message=msg,
+        actor_id=user.id,
+        metadata_json={
+            "from_status": current_status.value,
+            "to_status": target_status.value,
+            "reason": payload.reason,
+        },
     )
 
-    event = {
-        "type": "IncidentStatusChanged",
-        "incident_id": iid,
-        "from": str(current_status),
-        "to": str(payload.status),
-    }
-    await websocket_manager.broadcast("dashboard", event)
-    await websocket_manager.broadcast(f"incident:{iid}", event)
+    await websocket_manager.broadcast(
+        f"incident:{incident_id}",
+        {
+            "type": "IncidentStatusChanged",
+            "incident_id": str(incident_id),
+            "status": target_status.value,
+        },
+    )
 
-    updated_doc = await db.incidents.find_one({"id": iid})
-    return await _enrich_incident_read(updated_doc, db)  # type: ignore
+    return await _enrich_incident_read(session, updated)
 
 
 @router.post("/{incident_id}/reopen", response_model=IncidentRead)
 async def reopen_incident(
     incident_id: UUID,
-    payload: IncidentReopen,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    payload: IncidentReopenPayload,
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("incident:update")),
 ) -> IncidentRead:
-    iid = str(incident_id)
-    incident = await db.incidents.find_one({"id": iid})
+    incident = await IncidentRepository.get_by_id(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    clean_i = clean_doc(incident)
-    current_status = IncidentStatus(clean_i.get("status", IncidentStatus.CLOSED.value))
+    current_status = (
+        IncidentStatus(incident.status) if isinstance(incident.status, str) else incident.status
+    )
     validate_reopen(current_status)
 
-    now = datetime.now(UTC)
     updates = {
-        "status": str(IncidentStatus.INVESTIGATING),
-        "closed_at": None,
+        "status": IncidentStatus.TRIGGERED,
         "resolved_at": None,
-        "updated_at": now,
+        "closed_at": None,
     }
-    await db.incidents.update_one({"id": iid}, {"$set": updates})
+    updated = await IncidentRepository.update_incident(session, incident, updates)
 
-    await db.timeline_events.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": iid,
-            "actor_id": str(user.id),
-            "event_type": "IncidentReopened",
-            "message": f"Incident reopened from {current_status} by {user.full_name}. Justification: {payload.reason}",
-            "metadata_json": {
-                "reopened_by": user.email,
-                "from": str(current_status),
-                "reason": payload.reason,
-            },
-            "created_at": now,
-        }
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=incident.id,
+        event_type="IncidentReopened",
+        message=f"Incident reopened by {user.full_name}: {payload.reason}",
+        actor_id=user.id,
+        metadata_json={"reason": payload.reason, "from_status": current_status.value},
     )
 
-    event = {
-        "type": "IncidentReopened",
-        "incident_id": iid,
-        "reason": payload.reason,
-    }
-    await websocket_manager.broadcast("dashboard", event)
-    await websocket_manager.broadcast(f"incident:{iid}", event)
+    await websocket_manager.broadcast(
+        f"incident:{incident_id}",
+        {
+            "type": "IncidentStatusChanged",
+            "incident_id": str(incident_id),
+            "status": IncidentStatus.TRIGGERED.value,
+        },
+    )
 
-    updated_doc = await db.incidents.find_one({"id": iid})
-    return await _enrich_incident_read(updated_doc, db)  # type: ignore
+    return await _enrich_incident_read(session, updated)
 
 
 @router.post("/{incident_id}/assign", response_model=IncidentRead)
 async def assign_incident(
     incident_id: UUID,
-    payload: IncidentAssignRequest,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    payload: IncidentAssignPayload,
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("incident:assign")),
 ) -> IncidentRead:
-    iid = str(incident_id)
-    incident = await db.incidents.find_one({"id": iid})
+    incident = await IncidentRepository.get_by_id(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    target_user = await db.users.find_one({"id": str(payload.assignee_id)})
-    if target_user is None or not target_user.get("is_active", True):
-        raise AppError("USER_NOT_FOUND", "Target assignee not found or inactive", 404)
+    assignee = await UserRepository.get_by_id(session, payload.assignee_id)
+    if assignee is None:
+        raise AppError("USER_NOT_FOUND", "Assignee user not found", 404)
 
-    prev_assignee_id = incident.get("assignee_id")
-    now = datetime.now(UTC)
-
-    await db.incidents.update_one(
-        {"id": iid},
-        {"$set": {"assignee_id": str(payload.assignee_id), "updated_at": now}},
+    updated = await IncidentRepository.update_incident(
+        session, incident, {"assignee_id": payload.assignee_id}
     )
 
-    await db.incident_assignments.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": iid,
-            "assignee_id": str(payload.assignee_id),
-            "assigned_by_id": str(user.id),
-            "reason": payload.reason,
-            "created_at": now,
-        }
+    await IncidentRepository.assign_incident(
+        session=session,
+        incident_id=incident_id,
+        assignee_id=payload.assignee_id,
+        assigned_by_id=user.id,
+        reason=payload.reason,
     )
 
-    msg = f"Assigned to {target_user.get('full_name')} by {user.full_name}"
+    msg = f"Assigned to {assignee.full_name} by {user.full_name}"
     if payload.reason:
         msg += f" (Reason: {payload.reason})"
 
-    await db.timeline_events.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": iid,
-            "actor_id": str(user.id),
-            "event_type": "IncidentAssigned",
-            "message": msg,
-            "metadata_json": {
-                "previous_assignee_id": str(prev_assignee_id) if prev_assignee_id else None,
-                "new_assignee_id": str(payload.assignee_id),
-                "reason": payload.reason,
-            },
-            "created_at": now,
-        }
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=incident_id,
+        event_type="IncidentAssigned",
+        message=msg,
+        actor_id=user.id,
+        metadata_json={"assignee_id": str(payload.assignee_id), "reason": payload.reason},
     )
 
-    event = {
-        "type": "IncidentAssigned",
-        "incident_id": iid,
-        "assignee_id": str(payload.assignee_id),
-        "assignee_name": target_user.get("full_name"),
-    }
-    await websocket_manager.broadcast("dashboard", event)
-    await websocket_manager.broadcast(f"incident:{iid}", event)
+    await websocket_manager.broadcast(
+        f"incident:{incident_id}",
+        {
+            "type": "IncidentAssigned",
+            "incident_id": str(incident_id),
+            "assignee_id": str(payload.assignee_id),
+            "assignee_name": assignee.full_name,
+        },
+    )
 
-    updated_doc = await db.incidents.find_one({"id": iid})
-    return await _enrich_incident_read(updated_doc, db)  # type: ignore
+    return await _enrich_incident_read(session, updated)
 
 
 @router.post("/{incident_id}/comments", response_model=IncidentCommentRead, status_code=201)
 async def add_comment(
     incident_id: UUID,
     payload: IncidentCommentCreate,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(current_user),
 ) -> IncidentCommentRead:
-    iid = str(incident_id)
-    incident = await db.incidents.find_one({"id": iid})
+    incident = await IncidentRepository.get_by_id(session, incident_id)
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    now = datetime.now(UTC)
-    cid = str(uuid4())
-    comment_doc = {
-        "id": cid,
-        "incident_id": iid,
-        "author_id": str(user.id),
-        "body": payload.body,
-        "created_at": now,
-        "edited_at": None,
-    }
-    await db.incident_comments.insert_one(comment_doc)
-
-    await db.timeline_events.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": iid,
-            "actor_id": str(user.id),
-            "event_type": "CommentAdded",
-            "message": f"{user.full_name} commented: {payload.body[:100]}...",
-            "metadata_json": {"comment_id": cid},
-            "created_at": now,
-        }
+    comment = await IncidentRepository.add_comment(
+        session=session,
+        incident_id=incident_id,
+        author_id=user.id,
+        body=payload.body,
     )
 
-    event = {
-        "type": "CommentAdded",
-        "incident_id": iid,
-        "comment_id": cid,
-        "author": user.full_name,
-    }
-    await websocket_manager.broadcast(f"incident:{iid}", event)
+    await IncidentRepository.add_timeline_event(
+        session=session,
+        incident_id=incident_id,
+        event_type="CommentAdded",
+        message=f"{user.full_name} commented: '{payload.body[:80]}...'",
+        actor_id=user.id,
+        metadata_json={"comment_id": str(comment.id)},
+    )
+
+    await websocket_manager.broadcast(
+        f"incident:{incident_id}",
+        {
+            "type": "CommentAdded",
+            "incident_id": str(incident_id),
+            "comment_id": str(comment.id),
+            "author_name": user.full_name,
+        },
+    )
 
     return IncidentCommentRead(
-        id=cid,  # type: ignore
-        incident_id=iid,  # type: ignore
-        author_id=user.id,  # type: ignore
+        id=comment.id,
+        incident_id=comment.incident_id,
+        author_id=comment.author_id,
         author_name=user.full_name,
-        body=payload.body,
-        created_at=now,
-        edited_at=None,
+        body=comment.body,
+        created_at=comment.created_at,
+        edited_at=comment.edited_at,
     )
 
 
 @router.get("/{incident_id}/comments", response_model=list[IncidentCommentRead])
 async def list_comments(
     incident_id: UUID,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> list[IncidentCommentRead]:
-    iid = str(incident_id)
-    c_docs = (
-        await db.incident_comments.find({"incident_id": iid}).sort("created_at", 1).to_list(200)
-    )
-    author_ids = {str(c.get("author_id")) for c in c_docs if c.get("author_id")}
-    authors_map: dict[str, str] = {}
-    if author_ids:
-        users = await db.users.find({"id": {"$in": list(author_ids)}}).to_list(len(author_ids))
-        authors_map = {str(u["id"]): str(u["full_name"]) for u in users}
-
-    return [
-        IncidentCommentRead(
-            id=c["id"],
-            incident_id=c["incident_id"],
-            author_id=c["author_id"],
-            author_name=authors_map.get(str(c.get("author_id"))),
-            body=c["body"],
-            created_at=c["created_at"],
-            edited_at=c.get("edited_at"),
+    comments = await IncidentRepository.list_comments(session, incident_id)
+    u_cache = {}
+    result = []
+    for c in comments:
+        if c.author_id not in u_cache:
+            usr = await UserRepository.get_by_id(session, c.author_id)
+            u_cache[c.author_id] = usr.full_name if usr else "Unknown"
+        result.append(
+            IncidentCommentRead(
+                id=c.id,
+                incident_id=c.incident_id,
+                author_id=c.author_id,
+                author_name=u_cache[c.author_id],
+                body=c.body,
+                created_at=c.created_at,
+                edited_at=c.edited_at,
+            )
         )
-        for c in [clean_doc(d) for d in c_docs]
-    ]
+    return result
 
 
 @router.get("/{incident_id}/timeline", response_model=list[TimelineEventRead])
 async def get_timeline(
     incident_id: UUID,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> list[TimelineEventRead]:
-    iid = str(incident_id)
-    t_docs = await db.timeline_events.find({"incident_id": iid}).sort("created_at", 1).to_list(200)
-    actor_ids = {str(t.get("actor_id")) for t in t_docs if t.get("actor_id")}
-    actors_map: dict[str, str] = {}
-    if actor_ids:
-        users = await db.users.find({"id": {"$in": list(actor_ids)}}).to_list(len(actor_ids))
-        actors_map = {str(u["id"]): str(u["full_name"]) for u in users}
-
-    return [
-        TimelineEventRead(
-            id=t["id"],
-            incident_id=t["incident_id"],
-            actor_id=t.get("actor_id"),
-            actor_name=actors_map.get(str(t.get("actor_id"))),
-            event_type=t["event_type"],
-            message=t["message"],
-            metadata_json=t.get("metadata_json") or {},
-            created_at=t["created_at"],
+    events = await IncidentRepository.list_timeline_events(session, incident_id)
+    u_cache = {}
+    result = []
+    for e in events:
+        actor_name = None
+        if e.actor_id:
+            if e.actor_id not in u_cache:
+                usr = await UserRepository.get_by_id(session, e.actor_id)
+                u_cache[e.actor_id] = usr.full_name if usr else None
+            actor_name = u_cache[e.actor_id]
+        result.append(
+            TimelineEventRead(
+                id=e.id,
+                incident_id=e.incident_id,
+                actor_id=e.actor_id,
+                actor_name=actor_name,
+                event_type=e.event_type,
+                message=e.message,
+                metadata_json=e.metadata_json or {},
+                created_at=e.created_at,
+            )
         )
-        for t in [clean_doc(d) for d in t_docs]
-    ]
+    return result
 
 
 @router.get("/{incident_id}/alerts", response_model=list[AlertRead])
 async def list_incident_alerts(
     incident_id: UUID,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> list[AlertRead]:
-    iid = str(incident_id)
-    a_docs = await db.alerts.find({"incident_id": iid}).sort("last_seen", -1).to_list(200)
-    service_ids = {str(a.get("service_id")) for a in a_docs if a.get("service_id")}
-    s_map: dict[str, str] = {}
-    if service_ids:
-        s_docs = await db.services.find({"id": {"$in": list(service_ids)}}).to_list(
-            len(service_ids)
+    alerts = await IncidentRepository.list_incident_alerts(session, incident_id)
+    s_cache = {}
+    result = []
+    for a in alerts:
+        if a.service_id not in s_cache:
+            svc = await ServiceRepository.get_by_id(session, a.service_id)
+            s_cache[a.service_id] = svc.name if svc else None
+        result.append(
+            AlertRead(
+                id=a.id,
+                service_id=a.service_id,
+                service_name=s_cache[a.service_id],
+                incident_id=a.incident_id,
+                source=a.source,
+                severity=a.severity.value if hasattr(a.severity, "value") else str(a.severity),
+                title=a.title,
+                description=a.description,
+                fingerprint=a.fingerprint,
+                metadata_json=a.metadata_json or {},
+                first_seen=a.first_seen,
+                last_seen=a.last_seen,
+                occurrence_count=a.occurrence_count,
+                status=a.status.value if hasattr(a.status, "value") else str(a.status),
+                created_at=a.created_at,
+            )
         )
-        s_map = {str(s["id"]): str(s["name"]) for s in s_docs}
-
-    return [
-        AlertRead(
-            id=a["id"],
-            service_id=a["service_id"],
-            service_name=s_map.get(str(a.get("service_id"))),
-            incident_id=a.get("incident_id"),
-            source=a.get("source", "system"),
-            severity=a.get("severity", "error"),
-            title=a["title"],
-            description=a.get("description"),
-            fingerprint=a["fingerprint"],
-            metadata_json=a.get("metadata_json") or {},
-            first_seen=a.get("first_seen", a.get("created_at")),
-            last_seen=a.get("last_seen", a.get("created_at")),
-            occurrence_count=a.get("occurrence_count", 1),
-            status=a.get("status", "firing"),
-            created_at=a.get("created_at"),
-        )
-        for a in [clean_doc(d) for d in a_docs]
-    ]
+    return result

@@ -1,12 +1,11 @@
-from datetime import UTC, datetime, timedelta
-from typing import Any
-from uuid import UUID, uuid4
+from datetime import UTC, datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserAuth, idempotency_key, require_permission
-from app.core.database import clean_doc, get_db
+from app.core.database import get_session
 from app.core.errors import AppError
 from app.domain.idempotency import (
     get_idempotent_response,
@@ -17,10 +16,11 @@ from app.domain.incidents import calculate_severity
 from app.models.enums import (
     AlertSeverity,
     AlertStatus,
-    Criticality,
     IncidentSeverity,
-    IncidentStatus,
 )
+from app.repositories.alert_repo import AlertRepository
+from app.repositories.incident_repo import IncidentRepository
+from app.repositories.service_repo import ServiceRepository
 from app.schemas.alert import (
     AlertAcknowledgeRequest,
     AlertCreate,
@@ -33,30 +33,29 @@ from app.websocket.manager import websocket_manager
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
-async def _enrich_alert_read(alert_doc: dict[str, Any], db: AsyncIOMotorDatabase) -> AlertRead:
-    c = clean_doc(alert_doc)
+async def _enrich_alert(session: AsyncSession, alert) -> AlertRead:
     s_name = None
-    if c.get("service_id"):
-        s_doc = await db.services.find_one({"id": str(c["service_id"])})
-        if s_doc:
-            s_name = s_doc.get("name")
+    if alert.service_id:
+        svc = await ServiceRepository.get_by_id(session, alert.service_id)
+        if svc:
+            s_name = svc.name
 
     return AlertRead(
-        id=c["id"],
-        service_id=c["service_id"],
+        id=alert.id,
+        service_id=alert.service_id,
         service_name=s_name,
-        incident_id=c.get("incident_id"),
-        source=c.get("source", "system"),
-        severity=c.get("severity", AlertSeverity.ERROR.value),
-        title=c["title"],
-        description=c.get("description"),
-        fingerprint=c["fingerprint"],
-        metadata_json=c.get("metadata_json") or {},
-        first_seen=c.get("first_seen", c.get("created_at")),
-        last_seen=c.get("last_seen", c.get("created_at")),
-        occurrence_count=c.get("occurrence_count", 1),
-        status=c.get("status", AlertStatus.OPEN.value),
-        created_at=c.get("created_at"),
+        incident_id=alert.incident_id,
+        source=alert.source,
+        severity=alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity),
+        title=alert.title,
+        description=alert.description,
+        fingerprint=alert.fingerprint,
+        metadata_json=alert.metadata_json or {},
+        first_seen=alert.first_seen,
+        last_seen=alert.last_seen,
+        occurrence_count=alert.occurrence_count,
+        status=alert.status.value if hasattr(alert.status, "value") else str(alert.status),
+        created_at=alert.created_at,
     )
 
 
@@ -68,362 +67,261 @@ async def list_alerts(
     incident_id: UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> list[AlertRead]:
-    query: dict[str, Any] = {}
-    if status is not None:
-        query["status"] = str(status)
-    if severity is not None:
-        query["severity"] = str(severity)
-    if service_id is not None:
-        query["service_id"] = str(service_id)
-    if incident_id is not None:
-        query["incident_id"] = str(incident_id)
-
-    cursor = db.alerts.find(query).sort("last_seen", -1).skip(offset).limit(limit)
-    docs = await cursor.to_list(limit)
-
-    service_ids = {str(d.get("service_id")) for d in docs if d.get("service_id")}
-    s_map: dict[str, str] = {}
-    if service_ids:
-        s_docs = await db.services.find({"id": {"$in": list(service_ids)}}).to_list(
-            len(service_ids)
-        )
-        s_map = {str(s["id"]): str(s["name"]) for s in s_docs}
+    alerts = await AlertRepository.list_alerts(
+        session=session,
+        status=status,
+        severity=severity,
+        service_id=service_id,
+        incident_id=incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    # Cache service names
+    service_ids = {a.service_id for a in alerts if a.service_id}
+    svc_map = {}
+    for sid in service_ids:
+        s = await ServiceRepository.get_by_id(session, sid)
+        if s:
+            svc_map[sid] = s.name
 
     return [
         AlertRead(
-            id=c["id"],
-            service_id=c["service_id"],
-            service_name=s_map.get(str(c.get("service_id"))),
-            incident_id=c.get("incident_id"),
-            source=c.get("source", "system"),
-            severity=c.get("severity", AlertSeverity.ERROR.value),
-            title=c["title"],
-            description=c.get("description"),
-            fingerprint=c["fingerprint"],
-            metadata_json=c.get("metadata_json") or {},
-            first_seen=c.get("first_seen", c.get("created_at")),
-            last_seen=c.get("last_seen", c.get("created_at")),
-            occurrence_count=c.get("occurrence_count", 1),
-            status=c.get("status", AlertStatus.OPEN.value),
-            created_at=c.get("created_at"),
+            id=a.id,
+            service_id=a.service_id,
+            service_name=svc_map.get(a.service_id),
+            incident_id=a.incident_id,
+            source=a.source,
+            severity=a.severity.value if hasattr(a.severity, "value") else str(a.severity),
+            title=a.title,
+            description=a.description,
+            fingerprint=a.fingerprint,
+            metadata_json=a.metadata_json or {},
+            first_seen=a.first_seen,
+            last_seen=a.last_seen,
+            occurrence_count=a.occurrence_count,
+            status=a.status.value if hasattr(a.status, "value") else str(a.status),
+            created_at=a.created_at,
         )
-        for c in [clean_doc(d) for d in docs]
+        for a in alerts
     ]
 
 
 @router.post("", response_model=AlertRead, status_code=201)
 async def ingest_alert(
     payload: AlertCreate,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     key: str | None = Depends(idempotency_key),
 ) -> AlertRead:
     request_hash = payload_hash(payload.model_dump())
-    idempotent = await get_idempotent_response(db, key, "alert_ingest", request_hash)
+    idempotent = await get_idempotent_response(session, key, "alert_ingest", request_hash)
     if idempotent is not None:
-        existing_alert = await db.alerts.find_one({"id": idempotent["alert_id"]})
+        cached_id = UUID(str(idempotent["alert_id"]))
+        existing_alert = await AlertRepository.get_by_id(session, cached_id)
         if existing_alert is not None:
-            return await _enrich_alert_read(existing_alert, db)
+            return await _enrich_alert(session, existing_alert)
 
-    sid = str(payload.service_id)
-    service = await db.services.find_one({"id": sid})
+    service = await ServiceRepository.get_by_id(session, payload.service_id)
     if service is None:
         raise AppError("SERVICE_NOT_FOUND", "Service not found", 404)
 
     now = datetime.now(UTC)
 
-    # 1. Check for exact fingerprint deduplication
-    existing = await db.alerts.find_one({"fingerprint": payload.fingerprint})
+    # 1. Deduplication check
+    existing = await AlertRepository.get_by_fingerprint(session, payload.fingerprint)
     if existing:
-        occ = existing.get("occurrence_count", 1) + 1
-        new_st = clean_doc(existing).get("status", AlertStatus.OPEN.value)
-        if new_st in (str(AlertStatus.RESOLVED), str(AlertStatus.SUPPRESSED)):
-            new_st = str(AlertStatus.OPEN)
-
-        await db.alerts.update_one(
-            {"id": existing["id"]},
-            {"$set": {"last_seen": now, "occurrence_count": occ, "status": new_st}},
+        new_status = (
+            AlertStatus.OPEN
+            if existing.status in (AlertStatus.RESOLVED, AlertStatus.SUPPRESSED)
+            else existing.status
         )
-
+        updated = await AlertRepository.increment_occurrence(session, existing, new_status)
         await store_idempotent_response(
-            db,
+            session,
             key,
             "alert_ingest",
             request_hash,
-            {"alert_id": str(existing["id"]), "deduplicated": True},
+            {"alert_id": str(updated.id), "deduplicated": True},
         )
-
         await websocket_manager.broadcast(
             "dashboard",
             {
                 "type": "AlertDeduplicated",
-                "alert_id": existing["id"],
-                "fingerprint": existing["fingerprint"],
-                "occurrence_count": occ,
+                "alert_id": str(updated.id),
+                "fingerprint": updated.fingerprint,
+                "occurrence_count": updated.occurrence_count,
             },
         )
-        updated = await db.alerts.find_one({"id": existing["id"]})
-        return await _enrich_alert_read(updated, db)  # type: ignore
+        return await _enrich_alert(session, updated)
 
-    # 2. Check for alert correlation with an open active incident for the same service
-    active_statuses = [
-        str(IncidentStatus.DETECTED),
-        str(IncidentStatus.TRIGGERED),
-        str(IncidentStatus.ACKNOWLEDGED),
-        str(IncidentStatus.INVESTIGATING),
-        str(IncidentStatus.MITIGATING),
-    ]
-    active_incident = await db.incidents.find_one(
-        {"service_id": sid, "status": {"$in": active_statuses}}
+    # 2. Check for active open incident on the same service to correlate
+    active_incident = await IncidentRepository.find_active_for_service(session, payload.service_id)
+
+    incident_id = active_incident.id if active_incident else None
+    alert_severity = (
+        AlertSeverity(payload.severity) if isinstance(payload.severity, str) else payload.severity
     )
 
-    crit = Criticality(clean_doc(service).get("criticality", Criticality.MEDIUM.value))
+    alert = await AlertRepository.create_alert(
+        session=session,
+        service_id=payload.service_id,
+        incident_id=incident_id,
+        source=payload.source,
+        severity=alert_severity,
+        title=payload.title,
+        description=payload.description,
+        fingerprint=payload.fingerprint,
+        metadata_json={**payload.metadata, "idempotency_key": key},
+        first_seen=now,
+        last_seen=now,
+        occurrence_count=1,
+        status=AlertStatus.OPEN,
+    )
 
     if active_incident is not None:
-        alert_id = str(uuid4())
-        alert_doc = {
-            "id": alert_id,
-            "service_id": sid,
-            "incident_id": active_incident["id"],
-            "source": payload.source,
-            "severity": str(payload.severity),
-            "title": payload.title,
-            "description": payload.description,
-            "fingerprint": payload.fingerprint,
-            "metadata_json": {**payload.metadata, "idempotency_key": key, "correlated": True},
-            "first_seen": now,
-            "last_seen": now,
-            "occurrence_count": 1,
-            "status": AlertStatus.OPEN.value,
-            "created_at": now,
-        }
-        await db.alerts.insert_one(alert_doc)
-
-        new_severity = calculate_severity(payload.severity, crit)
-        curr_sev = IncidentSeverity(
-            clean_doc(active_incident).get("severity", IncidentSeverity.SEV3.value)
+        new_severity = calculate_severity(alert_severity, service.criticality)
+        curr_sev = (
+            IncidentSeverity(active_incident.severity)
+            if isinstance(active_incident.severity, str)
+            else active_incident.severity
         )
-        if new_severity.value < curr_sev.value:
-            await db.incidents.update_one(
-                {"id": active_incident["id"]},
-                {"$set": {"severity": str(new_severity), "updated_at": now}},
+        # Escalate incident severity if alert severity is higher
+        sev_rank = {
+            IncidentSeverity.SEV4: 4,
+            IncidentSeverity.SEV3: 3,
+            IncidentSeverity.SEV2: 2,
+            IncidentSeverity.SEV1: 1,
+        }
+        if sev_rank[new_severity] < sev_rank[curr_sev]:
+            await IncidentRepository.update_incident(
+                session, active_incident, {"severity": new_severity}
             )
 
-        await db.timeline_events.insert_one(
-            {
-                "id": str(uuid4()),
-                "incident_id": active_incident["id"],
-                "actor_id": None,
-                "event_type": "AlertCorrelated",
-                "message": f"Correlated alert: '{payload.title}' ({payload.severity})",
-                "metadata_json": {"alert_id": alert_id, "fingerprint": payload.fingerprint},
-                "created_at": now,
-            }
+        await IncidentRepository.add_timeline_event(
+            session=session,
+            incident_id=active_incident.id,
+            event_type="AlertCorrelated",
+            message=f"Correlated alert: '{payload.title}' ({alert_severity.value})",
+            actor_id=None,
+            metadata_json={"alert_id": str(alert.id), "fingerprint": payload.fingerprint},
         )
-
-        await store_idempotent_response(
-            db,
-            key,
-            "alert_ingest",
-            request_hash,
-            {"alert_id": alert_id, "incident_id": str(active_incident["id"]), "correlated": True},
-        )
-
-        await websocket_manager.broadcast(
-            "dashboard",
-            {
-                "type": "AlertCorrelated",
-                "incident_id": active_incident["id"],
-                "alert_id": alert_id,
-                "service_id": sid,
-            },
-        )
-        await websocket_manager.broadcast(
-            f"incident:{active_incident['id']}",
-            {"type": "AlertAttached", "incident_id": active_incident["id"], "alert_id": alert_id},
-        )
-        return await _enrich_alert_read(alert_doc, db)
-
-    # 3. Create a brand new incident for this alert
-    incident_id = str(uuid4())
-    inc_sev = calculate_severity(payload.severity, crit)
-    inc_doc = {
-        "id": incident_id,
-        "service_id": sid,
-        "title": payload.title,
-        "description": payload.description,
-        "status": IncidentStatus.TRIGGERED.value,
-        "severity": str(inc_sev),
-        "detected_at": now,
-        "acknowledged_at": None,
-        "resolved_at": None,
-        "closed_at": None,
-        "assignee_id": None,
-        "created_at": now,
-        "updated_at": now,
-    }
-    await db.incidents.insert_one(inc_doc)
-
-    alert_id = str(uuid4())
-    alert_doc = {
-        "id": alert_id,
-        "service_id": sid,
-        "incident_id": incident_id,
-        "source": payload.source,
-        "severity": str(payload.severity),
-        "title": payload.title,
-        "description": payload.description,
-        "fingerprint": payload.fingerprint,
-        "metadata_json": {**payload.metadata, "idempotency_key": key},
-        "first_seen": now,
-        "last_seen": now,
-        "occurrence_count": 1,
-        "status": AlertStatus.OPEN.value,
-        "created_at": now,
-    }
-    await db.alerts.insert_one(alert_doc)
-
-    await db.timeline_events.insert_one(
-        {
-            "id": str(uuid4()),
-            "incident_id": incident_id,
-            "actor_id": None,
-            "event_type": "IncidentCreated",
-            "message": f"Incident created from alert fingerprint '{payload.fingerprint}'",
-            "metadata_json": {"alert_source": payload.source, "alert_id": alert_id},
-            "created_at": now,
-        }
-    )
 
     await store_idempotent_response(
-        db,
+        session,
         key,
         "alert_ingest",
         request_hash,
-        {"alert_id": alert_id, "incident_id": incident_id, "deduplicated": False},
+        {"alert_id": str(alert.id), "deduplicated": False},
     )
 
     await websocket_manager.broadcast(
         "dashboard",
-        {"type": "IncidentCreated", "incident_id": incident_id, "alert_id": alert_id},
+        {
+            "type": "AlertCreated",
+            "alert_id": str(alert.id),
+            "service_id": str(payload.service_id),
+            "severity": alert_severity.value,
+            "title": payload.title,
+        },
     )
-    return await _enrich_alert_read(alert_doc, db)
+
+    return await _enrich_alert(session, alert)
 
 
 @router.get("/{alert_id}", response_model=AlertRead)
 async def get_alert(
     alert_id: UUID,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
 ) -> AlertRead:
-    aid = str(alert_id)
-    alert = await db.alerts.find_one({"id": aid})
+    alert = await AlertRepository.get_by_id(session, alert_id)
     if alert is None:
         raise AppError("ALERT_NOT_FOUND", "Alert not found", 404)
-    return await _enrich_alert_read(alert, db)
+    return await _enrich_alert(session, alert)
 
 
 @router.post("/{alert_id}/acknowledge", response_model=AlertRead)
 async def acknowledge_alert(
     alert_id: UUID,
-    payload: AlertAcknowledgeRequest = AlertAcknowledgeRequest(),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    payload: AlertAcknowledgeRequest,
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("alert:update")),
 ) -> AlertRead:
-    aid = str(alert_id)
-    alert = await db.alerts.find_one({"id": aid})
+    alert = await AlertRepository.get_by_id(session, alert_id)
     if alert is None:
         raise AppError("ALERT_NOT_FOUND", "Alert not found", 404)
 
-    now = datetime.now(UTC)
-    await db.alerts.update_one({"id": aid}, {"$set": {"status": str(AlertStatus.ACKNOWLEDGED)}})
-
-    if alert.get("incident_id"):
-        await db.timeline_events.insert_one(
-            {
-                "id": str(uuid4()),
-                "incident_id": alert["incident_id"],
-                "actor_id": str(user.id),
-                "event_type": "AlertAcknowledged",
-                "message": f"Alert '{alert['title']}' acknowledged by {user.full_name}",
-                "metadata_json": {"alert_id": aid, "reason": payload.reason},
-                "created_at": now,
-            }
+    updated = await AlertRepository.update_status(session, alert, AlertStatus.ACKNOWLEDGED)
+    if alert.incident_id:
+        await IncidentRepository.add_timeline_event(
+            session=session,
+            incident_id=alert.incident_id,
+            event_type="AlertAcknowledged",
+            message=f"Alert '{alert.title}' acknowledged by {user.full_name}",
+            actor_id=user.id,
+            metadata_json={"alert_id": str(alert.id), "reason": payload.reason},
         )
 
-    updated = await db.alerts.find_one({"id": aid})
-    return await _enrich_alert_read(updated, db)  # type: ignore
+    await websocket_manager.broadcast(
+        "dashboard",
+        {"type": "AlertStatusChanged", "alert_id": str(alert.id), "status": "ACKNOWLEDGED"},
+    )
+    return await _enrich_alert(session, updated)
 
 
 @router.post("/{alert_id}/suppress", response_model=AlertRead)
 async def suppress_alert(
     alert_id: UUID,
     payload: AlertSuppressRequest,
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("alert:update")),
 ) -> AlertRead:
-    aid = str(alert_id)
-    alert = await db.alerts.find_one({"id": aid})
+    alert = await AlertRepository.get_by_id(session, alert_id)
     if alert is None:
         raise AppError("ALERT_NOT_FOUND", "Alert not found", 404)
 
-    now = datetime.now(UTC)
-    meta = alert.get("metadata_json") or {}
-    meta["suppression"] = {
-        "suppressed_by": user.email,
-        "reason": payload.reason,
-        "until": (now + timedelta(minutes=payload.duration_minutes)).isoformat(),
-    }
-
-    await db.alerts.update_one(
-        {"id": aid},
-        {"$set": {"status": str(AlertStatus.SUPPRESSED), "metadata_json": meta}},
-    )
-
-    if alert.get("incident_id"):
-        await db.timeline_events.insert_one(
-            {
-                "id": str(uuid4()),
-                "incident_id": alert["incident_id"],
-                "actor_id": str(user.id),
-                "event_type": "AlertSuppressed",
-                "message": f"Alert '{alert['title']}' suppressed for {payload.duration_minutes}m by {user.full_name}: {payload.reason}",
-                "metadata_json": {"alert_id": aid, "reason": payload.reason},
-                "created_at": now,
-            }
+    updated = await AlertRepository.update_status(session, alert, AlertStatus.SUPPRESSED)
+    if alert.incident_id:
+        await IncidentRepository.add_timeline_event(
+            session=session,
+            incident_id=alert.incident_id,
+            event_type="AlertSuppressed",
+            message=f"Alert '{alert.title}' suppressed by {user.full_name} for {payload.duration_minutes}m: {payload.reason}",
+            actor_id=user.id,
+            metadata_json={"alert_id": str(alert.id), "reason": payload.reason},
         )
 
-    updated = await db.alerts.find_one({"id": aid})
-    return await _enrich_alert_read(updated, db)  # type: ignore
+    await websocket_manager.broadcast(
+        "dashboard",
+        {"type": "AlertStatusChanged", "alert_id": str(alert.id), "status": "SUPPRESSED"},
+    )
+    return await _enrich_alert(session, updated)
 
 
 @router.post("/{alert_id}/resolve", response_model=AlertRead)
 async def resolve_alert(
     alert_id: UUID,
-    payload: AlertResolveRequest = AlertResolveRequest(),
-    db: AsyncIOMotorDatabase = Depends(get_db),
+    payload: AlertResolveRequest,
+    session: AsyncSession = Depends(get_session),
     user: UserAuth = Depends(require_permission("alert:update")),
 ) -> AlertRead:
-    aid = str(alert_id)
-    alert = await db.alerts.find_one({"id": aid})
+    alert = await AlertRepository.get_by_id(session, alert_id)
     if alert is None:
         raise AppError("ALERT_NOT_FOUND", "Alert not found", 404)
 
-    now = datetime.now(UTC)
-    await db.alerts.update_one({"id": aid}, {"$set": {"status": str(AlertStatus.RESOLVED)}})
-
-    if alert.get("incident_id"):
-        await db.timeline_events.insert_one(
-            {
-                "id": str(uuid4()),
-                "incident_id": alert["incident_id"],
-                "actor_id": str(user.id),
-                "event_type": "AlertResolved",
-                "message": f"Alert '{alert['title']}' resolved by {user.full_name}",
-                "metadata_json": {"alert_id": aid, "reason": payload.reason},
-                "created_at": now,
-            }
+    updated = await AlertRepository.update_status(session, alert, AlertStatus.RESOLVED)
+    if alert.incident_id:
+        await IncidentRepository.add_timeline_event(
+            session=session,
+            incident_id=alert.incident_id,
+            event_type="AlertResolved",
+            message=f"Alert '{alert.title}' resolved by {user.full_name}",
+            actor_id=user.id,
+            metadata_json={"alert_id": str(alert.id), "reason": payload.reason},
         )
 
-    updated = await db.alerts.find_one({"id": aid})
-    return await _enrich_alert_read(updated, db)  # type: ignore
+    await websocket_manager.broadcast(
+        "dashboard",
+        {"type": "AlertStatusChanged", "alert_id": str(alert.id), "status": "RESOLVED"},
+    )
+    return await _enrich_alert(session, updated)

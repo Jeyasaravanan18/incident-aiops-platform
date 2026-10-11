@@ -45,23 +45,22 @@ server {
 
 ---
 
-## Render Deployment (Backend with MongoDB Atlas)
+## Render Deployment (Backend with Managed PostgreSQL)
 
 The repository includes a ready-to-use Render Blueprint (`render.yaml`).
 
 ### Option 1: Render Blueprint (Recommended - 1 Click)
 
-1. Ensure **Network Access** in your [MongoDB Atlas Dashboard](https://cloud.mongodb.com/) allows access from anywhere (`0.0.0.0/0`), which is required for cloud hosting on Render.
-2. Sign up or log into [Render Dashboard](https://dashboard.render.com/).
-3. Click **New +** -> **Blueprint**.
-4. Connect your GitHub repository: `https://github.com/Jeyasaravanan18/incident-aiops-platform`.
-5. Render detects `render.yaml` and sets up:
+1. Sign up or log into [Render Dashboard](https://dashboard.render.com/).
+2. Click **New +** -> **Blueprint**.
+3. Connect your GitHub repository: `https://github.com/Jeyasaravanan18/incident-aiops-platform`.
+4. Render detects `render.yaml` and sets up:
    - **Docker Web Service** (`incident-aiops-backend`)
-6. When prompted for environment variables:
-   - `MONGODB_URL`: Paste your MongoDB Atlas connection string (`mongodb+srv://...`)
-   - `GEMINI_API_KEY`: Supply your Gemini API key
-7. Click **Apply**.
-8. Render will build the container, automatically seed the initial enterprise incident scenario into MongoDB Atlas, and launch the service with live health checks.
+5. When prompted for environment variables:
+   - `DATABASE_URL`: Provide your PostgreSQL connection string (`postgresql+asyncpg://...`)
+   - `GEMINI_API_KEY`: Supply your Gemini API key (optional)
+6. Click **Apply**.
+7. Render will build the container, automatically seed the initial enterprise incident scenario into PostgreSQL, and launch the service with live health checks.
 
 ### Option 2: Manual Setup on Render
 
@@ -73,14 +72,13 @@ The repository includes a ready-to-use Render Blueprint (`render.yaml`).
    - Docker Context: `./backend`.
    - Health Check Path: `/health`.
 2. **Set Environment Variables**:
-   - `MONGODB_URL`: `mongodb+srv://...`
-   - `MONGODB_DB_NAME`: `incident_aiops`
+   - `DATABASE_URL`: `postgresql+asyncpg://user:pass@host:5432/incident_aiops`
    - `ENVIRONMENT`: `production`
    - `CORS_ORIGINS`: `*` (or your frontend URL)
    - `AUTO_SEED`: `true`
    - `LLM_PROVIDER`: `gemini`
    - `GEMINI_API_KEY`: `<your_gemini_api_key>`
-   - `GEMINI_MODEL`: `gemini-2.5-flash`
+   - `GEMINI_MODEL`: `gemini-3.6-flash`
    - `JWT_SECRET`: `<generate_random_32_char_secret>`
 
 
