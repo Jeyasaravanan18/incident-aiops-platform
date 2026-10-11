@@ -1,3 +1,10 @@
+databases:
+  - name: incident-aiops-db
+    databaseName: incident_aiops
+    user: postgres
+    plan: free
+    region: oregon
+
 services:
   - type: web
     name: incident-aiops-backend
@@ -15,7 +22,9 @@ services:
       - key: CORS_ORIGINS
         value: "*"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: incident-aiops-db
+          property: connectionString
       - key: AUTO_SEED
         value: "true"
       - key: LLM_PROVIDER
