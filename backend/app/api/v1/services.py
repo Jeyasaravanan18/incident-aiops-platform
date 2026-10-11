@@ -207,11 +207,7 @@ async def trigger_health_check(
     new_status = (
         ServiceStatus.HEALTHY
         if available
-        else (
-            ServiceStatus.DEGRADED
-            if (status_code and status_code < 500)
-            else ServiceStatus.DOWN
-        )
+        else (ServiceStatus.DEGRADED if (status_code and status_code < 500) else ServiceStatus.DOWN)
     )
 
     await db.services.update_one(

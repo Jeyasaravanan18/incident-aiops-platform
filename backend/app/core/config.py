@@ -1,19 +1,31 @@
 import json
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
-    mongodb_url: str = (
-        "mongodb+srv://sarjeya18_db_user:RL1pPN1YJpA2FLre@cluster0.ayb1anb.mongodb.net/?appName=Cluster0"
-    )
+    mongodb_url: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "incident_aiops"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/incident_aiops"
     sync_database_url: str = "postgresql://postgres:postgres@localhost:5432/incident_aiops"
+
+    @model_validator(mode="after")
+    def validate_required_configuration(self) -> "Settings":
+        """Fail fast with human-readable errors if mission-critical settings are absent."""
+        if not self.database_url or not self.database_url.strip():
+            raise ValueError(
+                "DATABASE_URL is required and cannot be empty. "
+                "Provide a valid PostgreSQL connection string (e.g., postgresql+asyncpg://user:pass@host:5432/db)."
+            )
+        if not self.jwt_secret or len(self.jwt_secret.strip()) < 16:
+            raise ValueError(
+                "JWT_SECRET is required and must be at least 16 characters long for cryptographic security."
+            )
+        return self
 
     @property
     def async_database_url(self) -> str:
@@ -40,7 +52,7 @@ class Settings(BaseSettings):
         return url
 
     redis_url: str = "redis://localhost:6379/0"
-    jwt_secret: str = Field(min_length=16, default="change-this-development-secret")
+    jwt_secret: str = Field(min_length=16, default="change-this-development-secret-min-16")
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 14
@@ -58,7 +70,7 @@ class Settings(BaseSettings):
                 pass
         return [i.strip() for i in val.split(",") if i.strip()]
 
-    llm_provider: str = "fake"
+    llm_provider: str = "heuristic"
     llm_api_key: str | None = None
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.6-flash"

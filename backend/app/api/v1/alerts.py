@@ -201,7 +201,9 @@ async def ingest_alert(
         await db.alerts.insert_one(alert_doc)
 
         new_severity = calculate_severity(payload.severity, crit)
-        curr_sev = IncidentSeverity(clean_doc(active_incident).get("severity", IncidentSeverity.SEV3.value))
+        curr_sev = IncidentSeverity(
+            clean_doc(active_incident).get("severity", IncidentSeverity.SEV3.value)
+        )
         if new_severity.value < curr_sev.value:
             await db.incidents.update_one(
                 {"id": active_incident["id"]},
