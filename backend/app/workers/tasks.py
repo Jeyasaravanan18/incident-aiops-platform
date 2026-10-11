@@ -6,7 +6,6 @@ from uuid import UUID
 import httpx
 from sqlalchemy import delete, select
 
-from app.ai.provider import get_llm_provider
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.domain.incidents import calculate_severity
@@ -14,7 +13,12 @@ from app.models.ai import AIAnalysis
 from app.models.alert import Alert
 from app.models.enums import AlertSeverity, AlertStatus, IncidentStatus, ServiceStatus
 from app.models.incident import Incident, TimelineEvent
+from app.models.postmortem import Postmortem
+from app.models.runbook import Runbook
 from app.models.service import Service, ServiceHealthCheck
+from app.repositories.knowledge_repo import KnowledgeRepository
+from app.services.rag_generation import generate_grounded_analysis
+from app.services.rag_retrieval import hybrid_retrieve
 from app.workers.celery_app import celery_app
 
 
@@ -141,33 +145,112 @@ async def _async_run_ai_analysis(incident_id: str) -> dict[str, object]:
         if not incident:
             return {"status": "error", "message": "Incident not found"}
 
-        from app.api.v1.ai import collect_incident_context
+        service_name = "Unknown Service"
+        if incident.service_id:
+            svc = await session.get(Service, incident.service_id)
+            if svc:
+                service_name = svc.name
 
-        context = await collect_incident_context(incident, session)
-        provider = get_llm_provider()
-        res = await provider.analyze(context)
+        # 1. RAG Hybrid Retrieval
+        query = f"{incident.title} {incident.description or ''}"
+        chunks = await hybrid_retrieve(
+            session=session,
+            query=query,
+            service_id=incident.service_id,
+            top_k=5,
+        )
+
+        # 2. Grounded Generation
+        rag_output, rag_meta = await generate_grounded_analysis(
+            incident=incident,
+            service_name=service_name,
+            retrieved_chunks=chunks,
+        )
+
+        evidence_items = [
+            {
+                "kind": "knowledge_chunk",
+                "fact": c.content[:200],
+                "chunk_id": str(c.id),
+                "source_type": c.source_type,
+            }
+            for c in chunks
+            if c.id in rag_output.citations
+        ]
 
         analysis = AIAnalysis(
             incident_id=incident.id,
-            provider="celery-worker-heuristic",
-            summary=res.summary,
-            probable_causes=res.probable_causes,
-            evidence=res.evidence,
-            recommended_actions=res.recommended_actions,
-            confidence=res.confidence,
-            related_incidents=res.related_incidents,
+            provider=rag_meta["model_name"],
+            summary=rag_output.summary,
+            probable_causes=rag_output.likely_causes,
+            evidence=evidence_items,
+            recommended_actions=rag_output.recommended_actions,
+            confidence=rag_output.confidence,
+            related_incidents=[str(c.source_id) for c in chunks[:3]],
+            model_name=rag_meta["model_name"],
+            prompt_version=rag_meta["prompt_version"],
+            retrieved_chunk_ids=rag_meta["retrieved_chunk_ids"],
+            chunk_scores=rag_meta["chunk_scores"],
+            latency_ms=rag_meta["latency_ms"],
+            attempts=rag_meta["attempts"],
+            validity_flags=rag_meta["validity_flags"],
+            fallback_used=rag_meta["fallback_used"],
         )
         session.add(analysis)
         session.add(
             TimelineEvent(
                 incident_id=incident.id,
                 event_type="AIAnalysisCompleted",
-                message=f"Background AI analysis completed. Confidence: {int(res.confidence * 100)}%",
-                metadata_json={"provider": "celery-worker"},
+                message=f"Background RAG AI analysis completed ({rag_meta['model_name']}). Confidence: {int(rag_output.confidence * 100)}%",
+                metadata_json={
+                    "provider": rag_meta["model_name"],
+                    "citations_count": len(rag_output.citations),
+                    "fallback_used": rag_meta["fallback_used"],
+                },
             )
         )
         await session.commit()
-        return {"status": "completed", "incident_id": incident_id, "confidence": res.confidence}
+        return {
+            "status": "completed",
+            "incident_id": incident_id,
+            "confidence": rag_output.confidence,
+            "fallback_used": rag_meta["fallback_used"],
+        }
+
+
+async def _async_reindex_knowledge_chunk(source_type: str, source_id_str: str) -> dict[str, object]:
+    source_id = UUID(source_id_str)
+    async with SessionLocal() as session:
+        if source_type == "runbook":
+            runbook = await session.get(Runbook, source_id)
+            if runbook:
+                content = f"{runbook.title}\nType: {runbook.incident_type}\n\n{runbook.body}"
+                chunks = await KnowledgeRepository.index_document(
+                    session=session,
+                    source_type="runbook",
+                    source_id=runbook.id,
+                    service_id=runbook.service_id,
+                    content=content,
+                )
+                await session.commit()
+                return {"status": "indexed", "chunks": len(chunks)}
+        elif source_type == "postmortem":
+            pm = await session.get(Postmortem, source_id)
+            if pm:
+                content = (
+                    f"Postmortem: {pm.title}\nRoot Cause: {pm.root_cause}\nSummary: {pm.summary}\n"
+                    f"Resolution: {pm.resolution}\nAction Items: {pm.action_items}"
+                )
+                chunks = await KnowledgeRepository.index_document(
+                    session=session,
+                    source_type="postmortem",
+                    source_id=pm.id,
+                    service_id=pm.service_id,
+                    content=content,
+                )
+                await session.commit()
+                return {"status": "indexed", "chunks": len(chunks)}
+    return {"status": "skipped"}
 
 
 async def _async_cleanup_health_history() -> dict[str, object]:
@@ -190,6 +273,11 @@ def run_ai_analysis(self, incident_id: str) -> dict[str, object]:
     return asyncio.run(_async_run_ai_analysis(incident_id))
 
 
+@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def reindex_knowledge_chunk(self, source_type: str, source_id: str) -> dict[str, object]:
+    return asyncio.run(_async_reindex_knowledge_chunk(source_type, source_id))
+
+
 @celery_app.task
 def cleanup_health_history() -> dict[str, object]:
-    return asyncio.run(_async_cleanup_health_history())
+    return asyncio.run(_async_cleanup_history := _async_cleanup_health_history())

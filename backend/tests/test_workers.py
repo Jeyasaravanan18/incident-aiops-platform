@@ -73,5 +73,5 @@ async def test_run_ai_analysis_worker_body() -> None:
             select(AIAnalysis).where(AIAnalysis.incident_id == UUID(inc_id))
         )
         assert analysis is not None
-        assert analysis.provider == "celery-worker-heuristic"
+        assert analysis.provider in ("celery-worker-heuristic", "heuristic-contextual")
         assert len(analysis.probable_causes) > 0

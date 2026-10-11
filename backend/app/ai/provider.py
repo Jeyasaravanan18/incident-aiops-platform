@@ -335,22 +335,16 @@ class GeminiLLMProvider:
 
 
 def get_llm_provider() -> LLMProvider:
-    """Pluggable provider factory: Gemini, OpenAI, or deterministic Heuristic fallback."""
+    """Pluggable provider factory: Gemini or deterministic Heuristic fallback."""
     from app.core.config import settings
 
     gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
     provider = (settings.llm_provider or "fake").lower()
 
-    if (provider == "gemini" or gemini_key) and gemini_key:
+    if (provider == "gemini" or gemini_key) and gemini_key and not gemini_key.startswith("test-"):
         return GeminiLLMProvider(
             api_key=gemini_key,
             model=settings.gemini_model,
         )
-
-    openai_key = os.getenv("OPENAI_API_KEY") or (
-        settings.llm_api_key if provider == "openai" else None
-    )
-    if openai_key:
-        return HeuristicContextualProvider()
 
     return HeuristicContextualProvider()

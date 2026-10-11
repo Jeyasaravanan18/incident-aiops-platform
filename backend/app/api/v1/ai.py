@@ -23,6 +23,8 @@ from app.schemas.ai import (
     RemediationItem,
     RemediationRecommendationResponse,
 )
+from app.services.rag_generation import generate_grounded_analysis
+from app.services.rag_retrieval import hybrid_retrieve
 from app.websocket.manager import websocket_manager
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -151,22 +153,57 @@ async def analyze_incident(
     if incident is None:
         raise AppError("INCIDENT_NOT_FOUND", "Incident not found", 404)
 
-    context = await collect_incident_context(incident, session)
-    provider = get_llm_provider()
-    result = await provider.analyze(context)
+    service_name = "Unknown Service"
+    if incident.service_id:
+        svc = await ServiceRepository.get_by_id(session, incident.service_id)
+        if svc:
+            service_name = svc.name
 
-    provider_name = "gemini" if hasattr(provider, "api_key") else "heuristic-contextual"
+    # 1. RAG Hybrid Retrieval (Dense Vector + Full-Text Search fused via RRF)
+    search_query = f"{incident.title} {incident.description or ''}"
+    retrieved_chunks = await hybrid_retrieve(
+        session=session,
+        query=search_query,
+        service_id=incident.service_id,
+        top_k=5,
+    )
+
+    # 2. Grounded Generation with Pydantic validation, retry, and citations
+    rag_output, rag_meta = await generate_grounded_analysis(
+        incident=incident,
+        service_name=service_name,
+        retrieved_chunks=retrieved_chunks,
+    )
+
+    evidence_items = [
+        {
+            "kind": "knowledge_chunk",
+            "fact": c.content[:200],
+            "chunk_id": str(c.id),
+            "source_type": c.source_type,
+        }
+        for c in retrieved_chunks
+        if c.id in rag_output.citations
+    ]
 
     analysis = await AIAnalysisRepository.create_analysis(
         session,
         incident_id=incident.id,
-        provider=provider_name,
-        summary=result.summary,
-        probable_causes=result.probable_causes,
-        evidence=result.evidence,
-        recommended_actions=result.recommended_actions,
-        confidence=result.confidence,
-        related_incidents=result.related_incidents,
+        provider=rag_meta["model_name"],
+        summary=rag_output.summary,
+        probable_causes=rag_output.likely_causes,
+        evidence=evidence_items,
+        recommended_actions=rag_output.recommended_actions,
+        confidence=rag_output.confidence,
+        related_incidents=[str(c.source_id) for c in retrieved_chunks[:3]],
+        model_name=rag_meta["model_name"],
+        prompt_version=rag_meta["prompt_version"],
+        retrieved_chunk_ids=rag_meta["retrieved_chunk_ids"],
+        chunk_scores=rag_meta["chunk_scores"],
+        latency_ms=rag_meta["latency_ms"],
+        attempts=rag_meta["attempts"],
+        validity_flags=rag_meta["validity_flags"],
+        fallback_used=rag_meta["fallback_used"],
     )
 
     await IncidentRepository.add_timeline_event(
@@ -174,10 +211,13 @@ async def analyze_incident(
         incident_id=incident.id,
         actor_id=None,
         event_type="AIAnalysisCompleted",
-        message=f"AI analysis generated with {int(result.confidence * 100)}% confidence and {len(result.evidence)} evidence items.",
+        message=f"RAG AI analysis generated ({rag_meta['model_name']}) with {int(rag_output.confidence * 100)}% confidence and {len(rag_output.citations)} verified citations.",
         metadata_json={
-            "confidence": result.confidence,
-            "causes_count": len(result.probable_causes),
+            "confidence": rag_output.confidence,
+            "causes_count": len(rag_output.likely_causes),
+            "citations_count": len(rag_output.citations),
+            "latency_ms": rag_meta["latency_ms"],
+            "fallback_used": rag_meta["fallback_used"],
         },
     )
 
@@ -187,7 +227,7 @@ async def analyze_incident(
             "type": "AIAnalysisCompleted",
             "incident_id": str(incident.id),
             "analysis_id": str(analysis.id),
-            "confidence": result.confidence,
+            "confidence": rag_output.confidence,
         },
     )
 

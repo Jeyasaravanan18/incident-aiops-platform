@@ -3,6 +3,7 @@ from app.models.alert import Alert
 from app.models.audit import AuditLog
 from app.models.idempotency import IdempotencyRecord
 from app.models.incident import Incident, IncidentAssignment, IncidentComment, TimelineEvent
+from app.models.knowledge import KnowledgeChunk
 from app.models.log import LogEntry
 from app.models.notification import Notification
 from app.models.postmortem import Postmortem
@@ -18,6 +19,7 @@ __all__ = [
     "Incident",
     "IncidentAssignment",
     "IncidentComment",
+    "KnowledgeChunk",
     "LogEntry",
     "Notification",
     "Postmortem",
