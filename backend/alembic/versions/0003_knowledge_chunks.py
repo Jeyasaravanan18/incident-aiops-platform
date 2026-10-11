@@ -7,6 +7,7 @@ Create Date: 2026-10-11
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.types import UserDefinedType
 
 from alembic import op
 
@@ -14,6 +15,16 @@ revision = "0003_knowledge_chunks"
 down_revision = "0002_schema_hardening"
 branch_labels = None
 depends_on = None
+
+
+class PGVector(UserDefinedType):
+    """Custom SQLAlchemy type representing PostgreSQL vector(N)."""
+
+    def __init__(self, dim: int = 768) -> None:
+        self.dim = dim
+
+    def get_col_spec(self, **kw: object) -> str:
+        return f"vector({self.dim})"
 
 
 def upgrade() -> None:
@@ -27,6 +38,8 @@ def upgrade() -> None:
     )
     if has_vector:
         bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector;"))
+
+    embedding_type = PGVector(768) if has_vector else postgresql.JSONB()
 
     # 1. Create knowledge_chunks table
     op.create_table(
@@ -44,7 +57,7 @@ def upgrade() -> None:
         sa.Column("token_count", sa.Integer(), server_default="0", nullable=False),
         sa.Column(
             "embedding",
-            sa.text("vector(768)") if has_vector else postgresql.JSONB(),
+            embedding_type,
             server_default=None if has_vector else "[]",
             nullable=False,
         ),
