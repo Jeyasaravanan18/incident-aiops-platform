@@ -33,7 +33,7 @@ We selected the **Modular Monolith**.
 Incident management data includes structured tabular data (users, permissions, services, incidents, status enums) and unstructured semi-structured payloads (alert metadata, log payloads, AI evidence, timeline metadata).
 
 ### Alternatives Considered
-1. **MongoDB / DocumentDB**: Flexible JSON document schemas for alerts and incident objects.
+1. **Document Stores (NoSQL)**: Flexible JSON document schemas for alerts and incident objects.
 2. **PostgreSQL 16 with JSONB & Full-Text Search**: ACID relational database with native binary JSON and GIN index capabilities.
 3. **Hybrid PostgreSQL + Elasticsearch**: PostgreSQL for core entities, Elasticsearch for logs and search.
 
@@ -79,24 +79,24 @@ We chose **Deterministic Multi-Factor Scoring** as the foundational layer, with 
 
 ---
 
-## 5. Decoupled AI/RAG Provider Strategy (Heuristic vs. OpenAI)
+## 5. Decoupled AI/RAG Provider Strategy (Heuristic vs. Google Gemini + pgvector)
 
 ### Context & Problem Statement
-Production incident triage requires synthesizing alerts, service metadata, historical postmortems, and contextual logs. However, relying solely on external cloud LLMs (OpenAI, Anthropic) introduces latency, privacy/compliance concerns (leaking internal customer data), cost, and internet dependency during corporate network isolations.
+Production incident triage requires synthesizing alerts, service metadata, historical postmortems, runbooks, and contextual logs. However, relying solely on external cloud LLMs introduces latency, rate limiting, and failure modes during network disruptions.
 
 ### Decision & Technical Rationale
-We designed a clean **`LLMProvider` Protocol**:
+We designed a clean **`LLMProvider` Protocol** combined with a hybrid pgvector RAG pipeline:
 ```python
 class LLMProvider(Protocol):
-    async def analyze(self, context: dict[str, Any]) -> AIAnalysisResult: ...
+    async def analyze(self, incident: Incident, chunks: list[KnowledgeChunk]) -> AIAnalysisResult: ...
     async def draft_postmortem(self, context: dict[str, Any]) -> PostmortemDraftResult: ...
 ```
 1. **`HeuristicContextualProvider` (Local / Zero-Dependency)**:
-   - Evaluates real context: cross-references active alerts, filters service logs, scans runbook steps for matching failure signatures, and extracts evidence.
+   - Evaluates retrieved knowledge chunks, correlates active alerts, and extracts deterministic failure signatures.
    - Strictly separates **Observed Facts** from **Probable Hypotheses**.
-   - Runs deterministically with zero API keys and zero cost—perfect for offline development, integration tests, and air-gapped deployments.
-2. **`OpenAILLMProvider` (Production Cloud Mode)**:
-   - Ingests the aggregated context and invokes GPT-4o / GPT-3.5-Turbo with JSON schema enforcement to produce rich investigative summaries when an API key is configured.
+   - Runs deterministically with zero external API keys and zero cost—ideal for offline development, CI/CD, and fallback safety.
+2. **`GeminiLLMProvider` (Production Cloud Mode)**:
+   - Ingests the aggregated context and invokes Google Gemini 1.5 Flash with Pydantic JSON schema enforcement, multi-turn validation retries, and strict citation grounding against retrieved knowledge chunks.
 
 ---
 

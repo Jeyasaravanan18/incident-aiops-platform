@@ -1,6 +1,6 @@
 # RAG Pipeline Evaluation & Benchmark Results
 
-**Evaluation Date:** `2026-10-11 10:24:48 UTC`  
+**Evaluation Date:** `2026-10-11 10:45:48 UTC`  
 **Dataset Size:** `42 labeled incident queries`  
 **Generation Sample Size:** `20 queries`  
 **Active AI Stack:** `DeterministicFakeEmbeddingProvider + HeuristicContextual (Offline / Test Mode)`  
@@ -34,8 +34,8 @@ Evaluated over 20 diverse production incident scenarios.
 | **Post-Retry JSON Valid Rate** | **100.0%** | 100% | Valid structured schema after max 2 feedback retries |
 | **Citation Validity (Grounding)** | **100.0%** | 100% | 100% of cited chunk IDs exist within the retrieved context set |
 | **Fallback Rate** | **100.0%** | < 10% | Failover to heuristic provider due to schema failure or API unavailability |
-| **P50 Latency** | **0.12 ms** | < 500 ms (offline) | Median wall-clock processing time per incident |
-| **P95 Latency** | **0.17 ms** | < 1500 ms (offline) | 95th percentile latency under load |
+| **P50 Latency** | **0.09 ms** | < 500 ms (offline) | Median wall-clock processing time per incident |
+| **P95 Latency** | **0.12 ms** | < 1500 ms (offline) | 95th percentile latency under load |
 
 > [!NOTE]
 > Evaluation was executed with **DeterministicFakeEmbeddingProvider + HeuristicContextual (Offline / Test Mode)**. In offline CI environments, the deterministic embedding provider generates unit-normalized semantic hash vectors, and the contextual heuristic provider enforces identical schema validation, citation grounding, and audit persistence as the live Gemini pipeline.

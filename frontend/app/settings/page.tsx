@@ -271,9 +271,8 @@ export default function SettingsPage() {
                 onChange={(e) => setAiProvider(e.target.value)}
                 className="form-input cursor-pointer font-medium"
               >
-                <option value="heuristic">Heuristic SRE Rule Engine (Built-in deterministic correlation)</option>
-                <option value="openai">OpenAI GPT-4o Telemetry Analyzer</option>
-                <option value="anthropic">Anthropic Claude 3.5 Sonnet SRE Copilot</option>
+                <option value="heuristic">Heuristic SRE Rule Engine (Deterministic correlation & fallback)</option>
+                <option value="gemini">Google Gemini 1.5 Flash (pgvector RAG + Grounded Analysis)</option>
               </select>
             </div>
 

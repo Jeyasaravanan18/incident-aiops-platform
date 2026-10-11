@@ -75,7 +75,7 @@ Verify services are healthy:
    - **AI Analysis & Hypothesis Engine**:
      - Click **"Run AI Root-Cause Analysis"**.
      - Point out the strict distinction between **Observed Facts** (corroborated from database logs and alerts) vs **Probable Hypotheses** (e.g. `HYPOTHESIS: Connection pool ceiling exceeded during sudden traffic spike`) vs **Remediation Steps** (e.g. `1. Run pg_stat_activity to inspect blocked queries. 2. Scale connection pool ceiling.`).
-     - Highlight that the system provides a zero-dependency deterministic heuristic provider for offline demos and seamlessly switches to OpenAI GPT-4o when `OPENAI_API_KEY` is present.
+     - Highlight that the system provides a zero-dependency deterministic heuristic provider for offline demos and seamlessly switches to Google Gemini 1.5 Flash with pgvector RAG when `GEMINI_API_KEY` is present.
    - **Correlated Alerts**: View all upstream telemetry linked by fingerprint.
    - **Contextual Service Logs**: View correlated log entries around the incident window with automated secret redaction (`[REDACTED_BEARER_TOKEN]`).
    - **Operational Runbook**: Linked emergency SOP and checklist for database pool triage.
